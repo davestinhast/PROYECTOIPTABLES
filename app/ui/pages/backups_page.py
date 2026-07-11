@@ -87,11 +87,7 @@ class BackupsPage(QWidget):
             btn = QPushButton("Restaurar")
             btn.setObjectName("btn_danger")
             btn.clicked.connect(lambda _, path=b["path"]: self._restore(path))
-            cell = QWidget()
-            cell_layout = QHBoxLayout(cell)
-            cell_layout.setContentsMargins(4, 2, 4, 2)
-            cell_layout.addWidget(btn)
-            self._table.setCellWidget(row, 3, cell)
+            self._table.setCellWidget(row, 3, btn)
 
         if not backups:
             self._table.setRowCount(1)

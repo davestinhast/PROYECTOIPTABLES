@@ -185,9 +185,9 @@ class ConnectionsPage(QWidget):
             chk = _QCB("Activo" if p.get("enabled", False) else "Inactivo")
             chk.setChecked(p.get("enabled", False))
             chk.setStyleSheet(
-                "QCheckBox { color: #94A3B8; font-size: 11px; padding: 0 8px; background: transparent; }"
+                "QCheckBox { color: #8AAABB; font-size: 11px; padding: 0 8px; background: transparent; }"
                 "QCheckBox:checked { color: #22C55E; }"
-                "QCheckBox::indicator { width:14px; height:14px; border-radius:4px; border:1px solid #29313D; background:#181F29; }"
+                "QCheckBox::indicator { width:14px; height:14px; border-radius:4px; border:1px solid #2B3E5C; background:#1F3050; }"
                 "QCheckBox::indicator:checked { background:#3B82F6; border-color:#3B82F6; }"
             )
             chk.toggled.connect(lambda checked, r=row, c=chk: (

@@ -83,8 +83,9 @@ class DashboardPage(QWidget):
         mode = get_mode()
         own_ip, iface = network_service.get_own_ip_and_interface()
 
-        def col(label: str, value: str, value_color: str = "#e5e5e5"):
+        def col(label: str, value: str, value_color: str = "#E2EAFA"):
             w = QWidget()
+            w.setObjectName("card_inner")
             l = QVBoxLayout(w)
             l.setContentsMargins(0, 0, 0, 0)
             l.setSpacing(2)
@@ -232,6 +233,7 @@ class DashboardPage(QWidget):
 
         # Contenido
         content = QWidget()
+        content.setObjectName("card_inner")
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(2)
@@ -241,7 +243,7 @@ class DashboardPage(QWidget):
         if done:
             title_lbl.setStyleSheet("color: #22C55E; font-weight: 600; font-size: 13px; background: transparent;")
         else:
-            title_lbl.setStyleSheet("color: #F1F5F9; font-weight: 600; font-size: 13px; background: transparent;")
+            title_lbl.setStyleSheet("color: #E2EAFA; font-weight: 600; font-size: 13px; background: transparent;")
 
         desc_lbl = QLabel(step["desc"])
         desc_lbl.setObjectName("label_secondary")
@@ -253,6 +255,7 @@ class DashboardPage(QWidget):
 
         # Estado + boton ir
         right = QWidget()
+        right.setObjectName("card_inner")
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(4)
@@ -342,13 +345,14 @@ class DashboardPage(QWidget):
 
         # Cabecera tabla manual
         header_row = QWidget()
+        header_row.setObjectName("card_inner")
         header_layout = QHBoxLayout(header_row)
         header_layout.setContentsMargins(8, 4, 8, 4)
         header_layout.setSpacing(0)
         for col_name, stretch in [("Hora", 2), ("Origen", 3), ("Destino", 3), ("Proto", 1), ("Motivo", 3)]:
             h = QLabel(col_name.upper())
             h.setObjectName("label_hint")
-            h.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent;")
+            h.setStyleSheet("color: #5C7A95; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent;")
             header_layout.addWidget(h, stretch=stretch)
         layout.addWidget(header_row)
 
@@ -357,6 +361,7 @@ class DashboardPage(QWidget):
         layout.addWidget(sep)
 
         self._log_rows_container = QWidget()
+        self._log_rows_container.setObjectName("card_inner")
         self._log_rows_layout = QVBoxLayout(self._log_rows_container)
         self._log_rows_layout.setContentsMargins(0, 0, 0, 0)
         self._log_rows_layout.setSpacing(0)
@@ -422,17 +427,18 @@ class DashboardPage(QWidget):
 
         for entry in entries:
             row = QWidget()
+            row.setObjectName("card_inner")
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(8, 5, 8, 5)
             row_layout.setSpacing(0)
 
-            def cell(text, stretch, color="#94A3B8"):
+            def cell(text, stretch, color="#8AAABB"):
                 lbl = QLabel(text)
                 lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-family: 'Consolas','Courier New',monospace; background: transparent;")
                 row_layout.addWidget(lbl, stretch=stretch)
 
             cell(entry.get("time", ""), 2)
-            cell(entry.get("src", ""), 3, "#e5e5e5")
+            cell(entry.get("src", ""), 3, "#E2EAFA")
             cell(entry.get("dst", ""), 3)
             cell(entry.get("proto", ""), 1)
 
