@@ -165,10 +165,59 @@ def _read_arp_table() -> list[dict]:
 
 
 def _resolve_hostname(ip: str) -> str:
+    """
+    Intenta resolver el hostname por varios métodos:
+    1. nmblookup (NetBIOS — funciona con PCs Windows en la misma LAN)
+    2. avahi-resolve-address (mDNS — funciona con Linux/Mac)
+    3. socket.gethostbyaddr (DNS inverso — fallback, rara vez funciona en labs)
+    """
+    # --- nmblookup (Windows NetBIOS) ---
     try:
-        return socket.gethostbyaddr(ip)[0]
+        result = subprocess.run(
+            ["nmblookup", "-A", ip],
+            capture_output=True, text=True, timeout=2
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            # Líneas de formato: "        NOMBRE         <00> -         B <ACTIVE>"
+            if "<00>" in line and "<GROUP>" not in line:
+                name = line.split("<00>")[0].strip()
+                if name and name != ip:
+                    return name
     except Exception:
-        return ""
+        pass
+
+    # --- avahi-resolve (mDNS Linux/Mac) ---
+    try:
+        result = subprocess.run(
+            ["avahi-resolve-address", ip],
+            capture_output=True, text=True, timeout=2
+        )
+        out = result.stdout.strip()
+        if out:
+            parts = out.split()
+            if len(parts) >= 2:
+                hostname = parts[1].rstrip(".")
+                if hostname and hostname != ip:
+                    return hostname
+    except Exception:
+        pass
+
+    # --- DNS inverso con timeout corto ---
+    import threading
+
+    result_holder = [""]
+
+    def _dns_lookup():
+        try:
+            result_holder[0] = socket.gethostbyaddr(ip)[0]
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_dns_lookup, daemon=True)
+    t.start()
+    t.join(timeout=1.0)
+    return result_holder[0]
 
 
 def _demo_devices() -> list[dict]:
