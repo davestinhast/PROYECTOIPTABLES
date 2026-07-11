@@ -52,6 +52,35 @@ def get_mode() -> str:
     return "demo"
 
 
+def has_ip_forward() -> bool:
+    """Verifica si el reenvío de paquetes IPv4 está activo."""
+    try:
+        with open("/proc/sys/net/ipv4/ip_forward") as f:
+            return f.read().strip() == "1"
+    except Exception:
+        return False
+
+
+def enable_ip_forward() -> bool:
+    """Activa ip_forward en tiempo de ejecución y de forma persistente."""
+    try:
+        with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+            f.write("1\n")
+        # Persistir en sysctl.conf si no está ya
+        sysctl_line = "net.ipv4.ip_forward = 1"
+        try:
+            with open("/etc/sysctl.conf", "r") as f:
+                content = f.read()
+            if sysctl_line not in content:
+                with open("/etc/sysctl.conf", "a") as f:
+                    f.write(f"\n# M-FIREWALL\n{sysctl_line}\n")
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def get_system_info() -> dict:
     return {
         "os": platform.system(),
@@ -62,6 +91,7 @@ def get_system_info() -> dict:
         "has_iptables": has_iptables(),
         "has_ipset": has_ipset(),
         "is_root": is_root(),
+        "ip_forward": has_ip_forward() if is_linux() else False,
         "mode": get_mode(),
         "python": sys.version.split()[0],
     }

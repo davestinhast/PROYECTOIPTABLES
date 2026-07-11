@@ -177,9 +177,11 @@ class MainWindow(QMainWindow):
 
         for page_id, (cls, cfg) in page_classes.items():
             page = cls(cfg)
-            # Conectar señal config_changed si existe
             if hasattr(page, "config_changed"):
                 page.config_changed.connect(self._on_config_changed)
+            # Botón Aplicar del dashboard conectado al método de la ventana
+            if page_id == "dashboard" and hasattr(page, "apply_requested"):
+                page.apply_requested.connect(self._apply_rules)
             self._pages[page_id] = page
             self._stack.addWidget(page)
 
@@ -217,6 +219,14 @@ class MainWindow(QMainWindow):
         btn_flush.setToolTip("Restaura la ultima copia de seguridad")
         btn_flush.clicked.connect(self._restore_last)
         layout.addWidget(btn_flush)
+
+        btn_reset = QPushButton("Resetear iptables")
+        btn_reset.setObjectName("btn_danger")
+        btn_reset.setToolTip("Elimina TODAS las reglas iptables activas (tráfico queda abierto)")
+        btn_reset.clicked.connect(self._reset_iptables)
+        if self._mode == "demo":
+            btn_reset.setEnabled(False)
+        layout.addWidget(btn_reset)
 
         self._btn_apply = QPushButton("Aplicar reglas")
         self._btn_apply.setObjectName("btn_primary")
@@ -321,3 +331,22 @@ class MainWindow(QMainWindow):
             from app.services import firewall_service
             ok, msg = firewall_service.restore_backup(last["path"])
             self._status_label.setText(msg)
+
+    def _reset_iptables(self):
+        reply = QMessageBox.warning(
+            self, "Resetear iptables",
+            "Esto eliminará TODAS las reglas iptables activas.\n"
+            "El tráfico quedará completamente abierto hasta que vuelvas a aplicar reglas.\n\n"
+            "¿Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        from app.services import firewall_service
+        ok, msg = firewall_service.flush_all()
+        self._status_label.setText(msg)
+        if ok:
+            QMessageBox.information(self, "Reglas eliminadas", msg)
+        else:
+            QMessageBox.warning(self, "Error", msg)

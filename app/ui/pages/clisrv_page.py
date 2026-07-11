@@ -170,8 +170,23 @@ class CliSrvPage(QWidget):
     def _load_config(self):
         clisrv = self._config.get("clisrv", {})
         self._enabled_toggle.setChecked(clisrv.get("enabled", False))
-        self._srv_ip_input.setText(clisrv.get("server_ip", ""))
-        self._cli_ip_input.setText(clisrv.get("client_ip", ""))
+
+        # Auto-fill: si no hay IP guardada, usar la detectada automáticamente
+        srv_ip = clisrv.get("server_ip", "")
+        if not srv_ip:
+            srv_ip = self._config.get("server_ip", "")
+        self._srv_ip_input.setText(srv_ip)
+
+        cli_ip = clisrv.get("client_ip", "")
+        if not cli_ip:
+            # Intentar derivar del client_network (/24 → .10 como sugerencia)
+            net = self._config.get("client_network", "")
+            if net and "/" in net:
+                base = net.split("/")[0]
+                parts = base.split(".")
+                if len(parts) == 4:
+                    cli_ip = f"{parts[0]}.{parts[1]}.{parts[2]}.10"
+        self._cli_ip_input.setText(cli_ip)
         protos = clisrv.get("protocols", ["tcp"])
         self._proto_tcp.setChecked("tcp" in protos)
         self._proto_udp.setChecked("udp" in protos)

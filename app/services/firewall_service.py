@@ -22,14 +22,19 @@ def validate_rules(rules_content: str) -> tuple[bool, str]:
 
 def apply_rules(rules_content: str, rules_path: str = LINUX_RULES_FILE) -> tuple[bool, str]:
     """
-    1. Valida
-    2. Crea backup
-    3. Escribe archivo
-    4. Aplica
-    5. Retorna (ok, mensaje)
+    1. Activa ip_forward (necesario para rutear tráfico entre PCs)
+    2. Valida
+    3. Crea backup
+    4. Escribe archivo
+    5. Aplica
+    6. Retorna (ok, mensaje)
     """
     if get_mode() == "demo":
         return False, "Modo demostración — no se pueden aplicar reglas en Windows."
+
+    # Activar reenvío de paquetes IPv4 — indispensable para el FORWARD chain
+    from app.core.platform_detector import enable_ip_forward
+    enable_ip_forward()
 
     ok, msg = validate_rules(rules_content)
     if not ok:

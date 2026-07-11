@@ -7,13 +7,15 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QPushButton, QGridLayout,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from app.core.platform_detector import get_system_info, get_mode
 from app.services import logging_service, network_service
 from app.constants import APP_AUTHORS, APP_VERSION
 
 
 class DashboardPage(QWidget):
+    apply_requested = Signal()   # emitido cuando el usuario pulsa Aplicar desde el dashboard
+
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
         self._config = config
@@ -54,6 +56,10 @@ class DashboardPage(QWidget):
         self._layout.addWidget(self._build_checklist_header())
         self._checklist_frame = self._build_checklist()
         self._layout.addWidget(self._checklist_frame)
+        self._layout.addSpacing(8)
+
+        # Botón Aplicar reglas prominente
+        self._layout.addWidget(self._build_apply_row())
         self._layout.addSpacing(4)
 
         # Estadísticas rápidas
@@ -111,6 +117,10 @@ class DashboardPage(QWidget):
         layout.addSpacing(32)
         layout.addWidget(col("Permisos", "root" if info["is_root"] else "usuario normal",
                              "#22c55e" if info["is_root"] else "#f59e0b"))
+        layout.addSpacing(32)
+        ip_fwd = info.get("ip_forward", False)
+        layout.addWidget(col("IP Forward", "Activo" if ip_fwd else "Inactivo",
+                             "#22c55e" if ip_fwd else "#ef4444"))
         layout.addStretch()
 
         # Estado firewall
@@ -287,6 +297,35 @@ class DashboardPage(QWidget):
             frame = self._build_step_card(step, done=done)
             self._checklist_frame.layout().addWidget(frame)
             self._step_frames.append(frame)
+
+    # ─── APPLY ROW ───────────────────────────────────────────────────────────
+    def _build_apply_row(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("card")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(16)
+
+        info_col = QVBoxLayout()
+        lbl_title = QLabel("Cuando todos los pasos esten listos")
+        lbl_title.setObjectName("label_subtitle")
+        lbl_desc = QLabel(
+            "Se validaran las reglas, se creara una copia de seguridad automatica "
+            "y se cargaran en iptables inmediatamente."
+        )
+        lbl_desc.setObjectName("label_secondary")
+        lbl_desc.setWordWrap(True)
+        info_col.addWidget(lbl_title)
+        info_col.addWidget(lbl_desc)
+        layout.addLayout(info_col, stretch=1)
+
+        btn = QPushButton("Aplicar reglas")
+        btn.setObjectName("btn_primary")
+        btn.setMinimumWidth(160)
+        btn.setMinimumHeight(38)
+        btn.clicked.connect(self.apply_requested.emit)
+        layout.addWidget(btn)
+        return frame
 
     # ─── STATS ───────────────────────────────────────────────────────────────
     def _build_stats_row(self) -> QWidget:

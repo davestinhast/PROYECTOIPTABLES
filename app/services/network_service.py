@@ -110,6 +110,33 @@ def _parse_arpscan_output(output: str) -> list[dict]:
     return devices
 
 
+# Tabla OUI mínima — primeros 6 dígitos hex del MAC → fabricante
+_OUI_TABLE: dict[str, str] = {
+    "00:50:56": "VMware",     "00:0C:29": "VMware",     "00:1C:14": "VMware",
+    "08:00:27": "VirtualBox", "52:54:00": "QEMU/KVM",
+    "AC:DE:48": "Apple",      "00:1A:11": "Apple",      "F4:5C:89": "Apple",
+    "3C:22:FB": "Apple",      "A8:51:AB": "Apple",      "DC:2B:2A": "Apple",
+    "00:1F:3B": "Intel",      "00:1B:21": "Intel",      "48:51:B7": "Intel",
+    "F8:75:A4": "Intel",      "8C:8D:28": "Intel",      "A4:C3:F0": "Intel",
+    "00:1A:2B": "Cisco",      "00:1E:13": "Cisco",      "28:AC:9E": "Cisco",
+    "00:23:AB": "Samsung",    "00:26:37": "Samsung",     "94:8B:C1": "Samsung",
+    "F4:7B:5E": "Samsung",    "8C:77:12": "Samsung",
+    "00:26:18": "Realtek",    "10:02:B5": "Realtek",
+    "FC:EC:DA": "Ubiquiti",   "00:27:22": "Ubiquiti",   "44:D9:E7": "Ubiquiti",
+    "00:0F:E2": "TP-Link",    "50:BD:5F": "TP-Link",    "C4:6E:1F": "TP-Link",
+    "74:DA:38": "Edimax",     "00:90:4C": "Epigram",
+    "00:11:22": "Asix",       "00:50:C2": "Bosch",
+    "B8:27:EB": "Raspberry",  "DC:A6:32": "Raspberry",  "E4:5F:01": "Raspberry",
+    "00:25:9C": "Cisco-Linksys", "20:AA:4B": "Cisco-Linksys",
+}
+
+
+def _lookup_oui(mac: str) -> str:
+    """Busca fabricante por los primeros 3 octetos del MAC."""
+    prefix = mac[:8].upper()
+    return _OUI_TABLE.get(prefix, "")
+
+
 def _read_arp_table() -> list[dict]:
     """Lee /proc/net/arp para obtener dispositivos conocidos."""
     devices = []
@@ -121,15 +148,15 @@ def _read_arp_table() -> list[dict]:
             if len(parts) >= 4:
                 ip = parts[0]
                 mac = parts[3].upper()
-                iface = parts[5] if len(parts) > 5 else ""
                 if mac == "00:00:00:00:00:00":
                     continue
                 hostname = _resolve_hostname(ip)
+                vendor = _lookup_oui(mac)
                 devices.append({
                     "ip": ip,
                     "mac": mac,
                     "hostname": hostname,
-                    "vendor": "",
+                    "vendor": vendor,
                     "status": "conocido",
                 })
     except Exception:
