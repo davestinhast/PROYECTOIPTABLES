@@ -21,12 +21,35 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    wan = config.get("interfaces", {}).get("wan", "")
+    lan = config.get("interfaces", {}).get("lan", "")
+
     lines += [
         f"# {APP_NAME} v{APP_VERSION} — Archivo de reglas personalizado",
         f"# Generado: {now}",
         f"# NO EDITAR MANUALMENTE — generado por la aplicación",
         f"# Cargar con: iptables-restore < project_m.rules.v4",
         "",
+    ]
+
+    # ── Tabla NAT: MASQUERADE para que Kali actúe como gateway/router ──────────
+    # Sin esto los clientes no pueden salir a internet a través de Kali
+    lines += [
+        "*nat",
+        ":PREROUTING ACCEPT [0:0]",
+        ":INPUT ACCEPT [0:0]",
+        ":OUTPUT ACCEPT [0:0]",
+        ":POSTROUTING ACCEPT [0:0]",
+    ]
+    if wan:
+        lines.append(f"-A POSTROUTING -o {wan} -j MASQUERADE")
+    else:
+        # Sin WAN configurada: masquerade en todas las interfaces de salida
+        lines.append("-A POSTROUTING -j MASQUERADE")
+    lines += ["COMMIT", ""]
+
+    # ── Tabla filter ────────────────────────────────────────────────────────────
+    lines += [
         "*filter",
         f":{CHAIN_WEBBLOCK} - [0:0]",
         f":{CHAIN_MACBLOCK} - [0:0]",
@@ -142,7 +165,6 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
         lines.append("")
 
     # === Saltos desde FORWARD hacia las cadenas personalizadas ===
-    lan = config.get("interfaces", {}).get("lan", "")
     iface_in = f"-i {lan} " if lan else ""
     iface_out = f"-o {lan} " if lan else ""
 

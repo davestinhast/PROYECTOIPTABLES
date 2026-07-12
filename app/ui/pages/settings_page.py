@@ -2,12 +2,13 @@
 Pantalla 8 — Configuración general
 """
 
+import subprocess
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QPushButton, QLineEdit, QComboBox,
     QSpinBox, QFormLayout, QFileDialog,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from app.core import validators
 from app.services import network_service
 from app.constants import LINUX_RULES_FILE, LINUX_LOG_FILE
@@ -40,6 +41,7 @@ class SettingsPage(QWidget):
         layout.addWidget(title)
 
         layout.addWidget(self._build_network_card())
+        layout.addWidget(self._build_routing_diag_card())
         layout.addWidget(self._build_paths_card())
         layout.addWidget(self._build_behavior_card())
 
@@ -97,6 +99,133 @@ class SettingsPage(QWidget):
         layout.addLayout(btn_row)
 
         return frame
+
+    def _build_routing_diag_card(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("card")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        title_row = QHBoxLayout()
+        subtitle = QLabel("Diagnóstico de enrutamiento")
+        subtitle.setObjectName("label_subtitle")
+        title_row.addWidget(subtitle)
+        title_row.addStretch()
+        btn_diag = QPushButton("Ejecutar diagnóstico")
+        btn_diag.setObjectName("btn_secondary")
+        btn_diag.clicked.connect(self._run_diag)
+        title_row.addWidget(btn_diag)
+        layout.addLayout(title_row)
+
+        desc = QLabel(
+            "Para que el bloqueo funcione en los clientes, éstos deben tener la IP de Kali "
+            "como gateway (puerta de enlace). Si no, su tráfico nunca pasa por Kali."
+        )
+        desc.setObjectName("label_secondary")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        # Resultados del diagnóstico
+        self._diag_labels: dict[str, QLabel] = {}
+        checks = [
+            ("ip_forward",   "IP Forward (net.ipv4.ip_forward)"),
+            ("masquerade",   "NAT MASQUERADE en iptables"),
+            ("wan_set",      "Interfaz WAN configurada"),
+            ("lan_set",      "Interfaz LAN configurada"),
+            ("server_ip",    "IP del servidor configurada"),
+        ]
+        for key, text in checks:
+            row = QHBoxLayout()
+            lbl_key = QLabel(text)
+            lbl_key.setObjectName("label_secondary")
+            lbl_key.setMinimumWidth(280)
+            lbl_val = QLabel("—")
+            lbl_val.setObjectName("label_secondary")
+            row.addWidget(lbl_key)
+            row.addWidget(lbl_val)
+            row.addStretch()
+            layout.addLayout(row)
+            self._diag_labels[key] = lbl_val
+
+        # Instrucciones para el cliente
+        instruct_frame = QFrame()
+        instruct_frame.setObjectName("card_step_pending")
+        instruct_layout = QVBoxLayout(instruct_frame)
+        instruct_layout.setContentsMargins(16, 12, 16, 12)
+        instruct_layout.setSpacing(6)
+
+        inst_title = QLabel("Cómo configurar el gateway en los clientes")
+        inst_title.setObjectName("label_subtitle")
+        instruct_layout.addWidget(inst_title)
+
+        self._instruct_label = QLabel(
+            "Ejecuta el diagnóstico para ver las instrucciones específicas."
+        )
+        self._instruct_label.setObjectName("label_secondary")
+        self._instruct_label.setWordWrap(True)
+        instruct_layout.addWidget(self._instruct_label)
+
+        layout.addWidget(instruct_frame)
+        return frame
+
+    def _run_diag(self):
+        from app.core.platform_detector import is_linux, has_ip_forward
+
+        # ip_forward
+        ip_fwd = has_ip_forward() if is_linux() else False
+        self._set_diag("ip_forward", ip_fwd, "Activo" if ip_fwd else "INACTIVO — ejecuta 'Aplicar reglas' para activarlo")
+
+        # MASQUERADE en iptables
+        masq = False
+        if is_linux():
+            try:
+                result = subprocess.run(
+                    ["iptables", "-t", "nat", "-L", "POSTROUTING", "-n"],
+                    capture_output=True, text=True, timeout=5
+                )
+                masq = "MASQUERADE" in result.stdout
+            except Exception:
+                masq = False
+        self._set_diag("masquerade", masq,
+                       "Configurado" if masq else "FALTA — aplica las reglas primero")
+
+        # Interfaces
+        wan = self._config.get("interfaces", {}).get("wan", "")
+        lan = self._config.get("interfaces", {}).get("lan", "")
+        self._set_diag("wan_set", bool(wan), wan if wan else "No configurada")
+        self._set_diag("lan_set", bool(lan), lan if lan else "No configurada")
+
+        # IP servidor
+        server_ip = self._config.get("server_ip", "")
+        self._set_diag("server_ip", bool(server_ip),
+                       server_ip if server_ip else "No configurada")
+
+        # Instrucciones para clientes
+        if server_ip:
+            net = self._config.get("client_network", "")
+            instructions = (
+                f"En cada PC cliente, configura la puerta de enlace (gateway) a:  {server_ip}\n\n"
+                f"Windows:  Panel de control → Centro de redes → Adaptador → Propiedades → "
+                f"IPv4 → Gateway predeterminado: {server_ip}\n\n"
+                f"Linux:  sudo ip route add default via {server_ip}\n\n"
+                f"Android/iOS:  WiFi → editar red → Gateway: {server_ip}\n\n"
+                f"Verificar en el cliente (cmd/terminal):  route print  o  ip route"
+            )
+        else:
+            instructions = (
+                "Primero configura la IP del servidor en la sección 'Red' de arriba, "
+                "luego vuelve a ejecutar el diagnóstico."
+            )
+        self._instruct_label.setText(instructions)
+
+    def _set_diag(self, key: str, ok: bool, text: str):
+        lbl = self._diag_labels.get(key)
+        if lbl:
+            color = "#22c55e" if ok else "#ef4444"
+            prefix = "✓" if ok else "✗"
+            lbl.setStyleSheet(f"color: {color}; font-weight: 600; background: transparent;")
+            lbl.setText(f"{prefix}  {text}")
 
     def _build_paths_card(self) -> QFrame:
         frame = QFrame()
