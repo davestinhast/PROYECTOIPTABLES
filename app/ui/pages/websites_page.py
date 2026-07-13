@@ -419,6 +419,12 @@ class WebsitesPage(QWidget):
         title.setObjectName("label_title")
         title_row.addWidget(title)
         title_row.addStretch()
+        
+        btn_repair = QPushButton("Restaurar Red")
+        btn_repair.setObjectName("btn_apply")
+        btn_repair.clicked.connect(self._repair_network)
+        title_row.addWidget(btn_repair)
+        
         btn_verify_all = QPushButton("Verificar todos")
         btn_verify_all.setObjectName("btn_secondary")
         btn_verify_all.clicked.connect(self._verify_all)
@@ -488,6 +494,17 @@ class WebsitesPage(QWidget):
         card = self._site_cards.get(key)
         if card:
             card.set_check_result(ip_count, rule_count, reachable)
+
+    def _repair_network(self):
+        from app.services import firewall_service
+        from PySide6.QtWidgets import QMessageBox
+        
+        ok, msg = firewall_service.flush_all()
+        if ok:
+            QMessageBox.information(self, "Red Restaurada", "Se han limpiado todas las reglas del sistema (incluyendo tablas NAT/Mangle).\nVerificando conectividad...")
+            self._verify_all()
+        else:
+            QMessageBox.warning(self, "Error", f"No se pudo limpiar la red: {msg}")
 
     def update_config(self, config: dict):
         self._config = config

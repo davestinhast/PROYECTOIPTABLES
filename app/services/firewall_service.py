@@ -69,17 +69,29 @@ def restore_backup(backup_path: str) -> tuple[bool, str]:
 
 
 def flush_all() -> tuple[bool, str]:
-    """Elimina todas las reglas iptables."""
+    """Elimina todas las reglas de todas las tablas de iptables."""
     if get_mode() == "demo":
         return False, "Modo demostración."
+    
+    # Limpiar tabla filter
     rc, _, err = command_runner.run_iptables(["-F"])
     if rc != 0:
         return False, err
     command_runner.run_iptables(["-X"])
+    
+    # Limpiar tabla nat
+    command_runner.run_iptables(["-t", "nat", "-F"])
+    command_runner.run_iptables(["-t", "nat", "-X"])
+    
+    # Limpiar tabla mangle
+    command_runner.run_iptables(["-t", "mangle", "-F"])
+    command_runner.run_iptables(["-t", "mangle", "-X"])
+
+    # Políticas por defecto a ACCEPT
     command_runner.run_iptables(["-P", "INPUT", "ACCEPT"])
     command_runner.run_iptables(["-P", "FORWARD", "ACCEPT"])
     command_runner.run_iptables(["-P", "OUTPUT", "ACCEPT"])
-    return True, "Reglas eliminadas. Tráfico abierto."
+    return True, "Todas las reglas del sistema (Filter, NAT y Mangle) han sido eliminadas."
 
 
 def get_active_rules() -> tuple[bool, str]:
