@@ -184,7 +184,7 @@ class _PrereqCard(QFrame):
                 self._btn_enable_ipfwd.setVisible(False)
             else:
                 self._ipfwd_lbl.setText("✗  IP Forward: INACTIVO — los paquetes no se reenvían")
-                self._ipfwd_lbl.setStyleSheet("color: #ff3333; font-size: 12px; background: transparent;")
+                self._ipfwd_lbl.setStyleSheet("color: #ff5555; font-size: 12px; background: transparent;")
                 self._btn_enable_ipfwd.setVisible(True)
         else:
             self._ipfwd_lbl.setText("—  IP Forward: no aplica (modo demo)")
@@ -351,13 +351,13 @@ class SiteCard(QFrame):
                 "color: #22c55e; font-size: 11px; font-weight: 600; background: transparent;"
             )
             self._rules_label.setStyleSheet(
-                "color: #ff3333; font-weight: 600; font-size: 11px; background: transparent;"
+                "color: #ff5555; font-weight: 600; font-size: 11px; background: transparent;"
             )
             self._rules_label.setText("Reglas: 0 (inactivas)")
         else:
             self._badge.setText("🔴  BLOQUEADO")
             self._badge.setStyleSheet(
-                "color: #ff3333; font-size: 11px; font-weight: 600; background: transparent;"
+                "color: #ff5555; font-size: 11px; font-weight: 600; background: transparent;"
             )
             self._rules_label.setStyleSheet(
                 "color: #22c55e; font-weight: 600; font-size: 11px; background: transparent;"

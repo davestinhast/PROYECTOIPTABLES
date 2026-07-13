@@ -43,7 +43,7 @@ QTabBar::tab:hover {
 
 QTabBar::tab:selected {
     background-color: rgba(10, 10, 10, 0.85);
-    color: #FF3333; /* Red active tab text */
+    color: #ff5555; /* Bright Red active tab text */
     border: 1px solid #332222;
     border-bottom: 1px solid rgba(10, 10, 10, 0.85);
 }
@@ -71,7 +71,7 @@ QTabBar::tab:selected {
 #label_subtitle {
     font-size: 13px;
     font-weight: bold;
-    color: #FF3333; /* Crimson Accent */
+    color: #ff5555; /* Bright Crimson Accent */
 }
 
 #label_secondary {
@@ -134,15 +134,15 @@ QPushButton:disabled {
 }
 
 #btn_apply, QPushButton[objectName="btn_apply"] {
-    background-color: #7b0d0d;
-    border-color: #a81212;
+    background-color: #a81212;
+    border-color: #ff3333;
     color: #FFFFFF;
     font-weight: bold;
 }
 
 #btn_apply:hover, QPushButton[objectName="btn_apply"]:hover {
-    background-color: #9c1010;
-    border-color: #c91a1a;
+    background-color: #c91a1a;
+    border-color: #ff5555;
 }
 
 /* Checkbox & inputs */
@@ -160,12 +160,12 @@ QCheckBox::indicator {
 }
 
 QCheckBox::indicator:hover {
-    border-color: #FF3333;
+    border-color: #ff5555;
 }
 
 QCheckBox::indicator:checked {
-    background-color: #7b0d0d;
-    border-color: #FF3333;
+    background-color: #a81212;
+    border-color: #ff5555;
 }
 
 QComboBox, QLineEdit, QSpinBox {

@@ -73,7 +73,7 @@ class CliSrvPage(QWidget):
             )
             return lbl
 
-        self._srv_label = box("SERVIDOR\n192.168.50.1", "#ff3333")
+        self._srv_label = box("SERVIDOR\n192.168.50.1", "#ff5555")
         self._allow_arrow = QLabel("  ──────────────▶  ")
         self._allow_arrow.setObjectName("label_secondary")
         self._allow_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -84,12 +84,12 @@ class CliSrvPage(QWidget):
         self._block_row.setSpacing(0)
         block_arrow = QLabel("  ━━━━━━━━━━ ✕ ━━▶  ")
         block_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        block_arrow.setStyleSheet("color: #ff3333; font-weight: 700; background: transparent;")
+        block_arrow.setStyleSheet("color: #ff5555; font-weight: 700; background: transparent;")
 
         allow_text = QLabel("✓ Servidor → Cliente: PERMITIDO")
         allow_text.setStyleSheet("color: #22c55e; font-weight: bold; background: transparent;")
         block_text = QLabel("✗ Cliente → Servidor (NEW): BLOQUEADO")
-        block_text.setStyleSheet("color: #ff3333; font-weight: bold; background: transparent;")
+        block_text.setStyleSheet("color: #ff5555; font-weight: bold; background: transparent;")
 
         row.addWidget(self._srv_label)
         row.addWidget(self._allow_arrow)
@@ -158,7 +158,7 @@ class CliSrvPage(QWidget):
         layout.addLayout(form)
 
         self._error_label = QLabel("")
-        self._error_label.setStyleSheet("color: #ff3333; font-size: 12px; background: transparent;")
+        self._error_label.setStyleSheet("color: #ff5555; font-size: 12px; background: transparent;")
         layout.addWidget(self._error_label)
 
         return frame
