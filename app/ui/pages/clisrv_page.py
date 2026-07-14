@@ -93,13 +93,7 @@ class CliSrvPage(QWidget):
 
         desc_layout.addLayout(flow_layout)
 
-        # Explicacion infantil/sencilla
-        simple_explain = QLabel(
-            "Explicacion simple: Es como una puerta que solo se abre desde adentro. "
-            "El servidor puede salir a buscar al cliente, pero ningun cliente de afuera puede entrar a molestar al servidor."
-        )
-        simple_explain.setStyleSheet("font-style: italic; color: #8892a4; font-size: 11px; background: transparent;")
-        desc_layout.addWidget(simple_explain)
+
 
         layout.addWidget(desc_card)
 

@@ -167,8 +167,15 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
             ip_count = len(resolved_ips.get(key, []))
             lines.append(f"# {label} — set: {set_name} ({ip_count} IPs cargadas)")
             for port in WEB_BLOCK_PORTS:
+                # Bloquear TCP
                 lines.append(
                     f"-A {CHAIN_WEBBLOCK} -p tcp --dport {port} "
+                    f"-m set --match-set {set_name} dst "
+                    f"-j {IPTABLES_CHAIN_REJECT}"
+                )
+                # Bloquear UDP (Evita bypass con HTTP/3 / QUIC)
+                lines.append(
+                    f"-A {CHAIN_WEBBLOCK} -p udp --dport {port} "
                     f"-m set --match-set {set_name} dst "
                     f"-j {IPTABLES_CHAIN_REJECT}"
                 )

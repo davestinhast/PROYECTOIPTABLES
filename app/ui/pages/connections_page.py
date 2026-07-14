@@ -120,29 +120,7 @@ class ConnectionsPage(QWidget):
         title.setObjectName("label_title")
         layout.addWidget(title)
 
-        # Explicacion para niños de primaria (sencilla e ilustrativa)
-        desc_card = QFrame()
-        desc_card.setObjectName("card_accent_blue")
-        desc_layout = QVBoxLayout(desc_card)
-        desc_layout.setContentsMargins(20, 16, 20, 16)
-        desc_layout.setSpacing(8)
 
-        desc_title = QLabel("¿Que hace esta pantalla?")
-        desc_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #3b82f6; background: transparent;")
-        desc_layout.addWidget(desc_title)
-
-        analogy = QLabel(
-            "Analogia simple: Es como poner un portero en la entrada de una tienda. "
-            "Si una sola persona intenta entrar con 10 amigos al mismo tiempo, el portero le dice: "
-            "\"Alto, solo puedes entrar tu y 2 mas, los demas esperan afuera\".\n\n"
-            "Evita que un solo atacante intente saturar tus servicios (como tu sitio web o acceso SSH) "
-            "haciendo miles de solicitudes por segundo desde su computadora."
-        )
-        analogy.setObjectName("label_secondary")
-        analogy.setWordWrap(True)
-        desc_layout.addWidget(analogy)
-
-        layout.addWidget(desc_card)
 
         # Tabla de perfiles
         layout.addWidget(self._build_profiles_card())

@@ -116,9 +116,15 @@ def apply_rules(
     # 7. Aplicar
     rc, stdout, stderr = command_runner.run_iptables_restore(rules_content)
     if rc == 0:
+        # Deshabilitar IPv6 para forzar fallback a IPv4 (donde actuan las reglas)
+        # Esto previene fugas de trafico por IPv6 en hogares con dual-stack.
+        command_runner.run(["ip6tables", "-P", "INPUT", "DROP"])
+        command_runner.run(["ip6tables", "-P", "FORWARD", "DROP"])
+        command_runner.run(["ip6tables", "-P", "OUTPUT", "DROP"])
+
         rule_count = rules_builder.get_rule_count(rules_content)
         return True, (
-            f"Reglas aplicadas. {rule_count} reglas en {target_path}"
+            f"Reglas aplicadas. {rule_count} reglas en {target_path} (IPv6 deshabilitado para evitar fugas)."
         )
     return False, stderr.strip() or "Error al aplicar reglas."
 
