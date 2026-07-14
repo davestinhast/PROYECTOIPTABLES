@@ -23,23 +23,33 @@ from app.constants import IPSET_SET_PREFIX
 
 
 def resolve_domain(domain: str) -> list[str]:
-    """Retorna lista de IPs para un dominio."""
+    """Retorna lista de IPs para un dominio usando multiples resolvidores publicos."""
     ips = set()
-    # Método 1: socket estándar
+
+    # 1. Resolver con el resolver por defecto del sistema
     try:
         results = socket.getaddrinfo(domain, None, socket.AF_INET)
         for r in results:
             ips.add(r[4][0])
     except Exception:
         pass
-    # Método 2: dnspython si está disponible
+
+    # 2. Resolver consultando servidores DNS publicos populares (para capturar IPs balanceadas por CDN)
     if HAS_DNSPYTHON:
-        try:
-            answers = dns.resolver.resolve(domain, "A")
-            for rdata in answers:
-                ips.add(str(rdata))
-        except Exception:
-            pass
+        # Consultar varios servidores para obtener una lista mas completa
+        dns_servers = ["1.1.1.1", "8.8.8.8", "9.9.9.9", "8.8.4.4"]
+        for ns in dns_servers:
+            try:
+                resolver = dns.resolver.Resolver()
+                resolver.nameservers = [ns]
+                resolver.timeout = 1.5
+                resolver.lifetime = 1.5
+                answers = resolver.resolve(domain, "A")
+                for rdata in answers:
+                    ips.add(str(rdata))
+            except Exception:
+                pass
+
     return sorted(ips)
 
 

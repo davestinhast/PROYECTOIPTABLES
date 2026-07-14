@@ -5,6 +5,7 @@ Bloquea acceso a Facebook, YouTube y Hotmail mediante ipset + iptables.
 
 import subprocess
 import socket
+import webbrowser
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -595,6 +596,15 @@ class SiteCard(QFrame):
         self._toggle.setStyleSheet("font-weight: 600; color: #c0c8d8; background: transparent;")
         top_row.addWidget(self._toggle)
 
+        # Botón Abrir sitio
+        self._btn_open = QPushButton("Abrir sitio")
+        self._btn_open.setObjectName("btn_small")
+        self._btn_open.setStyleSheet("background-color: #1e2235; border-color: #3a4060; color: #a0b0cc;")
+        self._btn_open.setToolTip("Abre la url en tu navegador para validar el bloqueo")
+        primary_domain = self._cfg.get("domains", [""])[0]
+        self._btn_open.clicked.connect(lambda: self._open_browser(primary_domain))
+        top_row.addWidget(self._btn_open)
+
         self._btn_check = QPushButton("Verificar")
         self._btn_check.setObjectName("btn_small")
         self._btn_check.clicked.connect(lambda: self.check_requested.emit(self._key))
@@ -694,6 +704,13 @@ class SiteCard(QFrame):
         self._toggle.blockSignals(True)
         self._toggle.setChecked(enabled)
         self._toggle.blockSignals(False)
+
+    def _open_browser(self, url: str):
+        if url:
+            try:
+                webbrowser.open(f"https://{url}")
+            except Exception:
+                pass
 
 
 # ─── PAGE ────────────────────────────────────────────────────────────────────
