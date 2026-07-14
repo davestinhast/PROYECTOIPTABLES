@@ -1,9 +1,14 @@
 """
 Resuelve dominios a IPs y gestiona los conjuntos IPSET.
+
+Los sets de ipset (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL) permiten
+actualizar las IPs bloqueadas sin necesidad de recargar iptables,
+lo que es esencial ya que los CDN de estos sitios cambian constantemente.
 """
 
 import socket
 import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -14,18 +19,20 @@ try:
 except ImportError:
     HAS_DNSPYTHON = False
 
+from app.constants import IPSET_SET_PREFIX
+
 
 def resolve_domain(domain: str) -> list[str]:
     """Retorna lista de IPs para un dominio."""
     ips = set()
-    # método 1: socket estándar
+    # Método 1: socket estándar
     try:
         results = socket.getaddrinfo(domain, None, socket.AF_INET)
         for r in results:
             ips.add(r[4][0])
     except Exception:
         pass
-    # método 2: dnspython si está disponible
+    # Método 2: dnspython si está disponible
     if HAS_DNSPYTHON:
         try:
             answers = dns.resolver.resolve(domain, "A")
@@ -58,6 +65,60 @@ def resolve_all_domains(blocked_domains: dict, progress_cb: Optional[Callable] =
     return result
 
 
+def build_ipset_file(resolved: dict[str, list[str]]) -> str:
+    """Genera contenido del archivo .ipset para ipset restore."""
+    lines = [
+        "# M-FIREWALL — conjuntos IPSET",
+        f"# Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "# Cargar con: ipset restore < project_m.ipset",
+        "",
+    ]
+    for key, ips in resolved.items():
+        set_name = f"{IPSET_SET_PREFIX}{key.upper()}"
+        lines.append(f"create {set_name} hash:ip family inet hashsize 1024 maxelem 65536 -exist")
+        lines.append(f"flush {set_name}")
+        for ip in ips:
+            lines.append(f"add {set_name} {ip}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def apply_ipset(resolved: dict[str, list[str]]) -> tuple[bool, str]:
+    """
+    Aplica los sets de ipset directamente mediante 'ipset restore'.
+    Crea o actualiza PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL con las IPs actuales.
+    Retorna (ok, mensaje).
+    """
+    if not resolved:
+        return True, "No hay sitios habilitados para bloquear con ipset."
+
+    ipset_content = build_ipset_file(resolved)
+
+    try:
+        result = subprocess.run(
+            ["ipset", "restore"],
+            input=ipset_content,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            total_ips = sum(len(ips) for ips in resolved.values())
+            sets_str = ", ".join(
+                f"{IPSET_SET_PREFIX}{k.upper()} ({len(v)} IPs)"
+                for k, v in resolved.items()
+            )
+            return True, f"ipset actualizado: {sets_str}"
+        else:
+            return False, f"Error en ipset restore: {result.stderr.strip()}"
+    except FileNotFoundError:
+        return False, "ipset no está instalado. Ejecuta: apt-get install ipset"
+    except subprocess.TimeoutExpired:
+        return False, "Timeout al ejecutar ipset restore."
+    except Exception as e:
+        return False, f"Error inesperado en ipset: {e}"
+
+
 def save_resolved_ips(resolved: dict[str, list[str]], cache_path: str) -> bool:
     """Guarda IPs resueltas en JSON para caché."""
     try:
@@ -85,20 +146,3 @@ def load_resolved_ips(cache_path: str) -> tuple[Optional[dict], Optional[str]]:
         return data.get("resolved", {}), data.get("timestamp")
     except Exception:
         return None, None
-
-
-def build_ipset_file(resolved: dict[str, list[str]]) -> str:
-    """Genera contenido del archivo .ipset para ipset restore."""
-    lines = [
-        "# M-FIREWALL — conjuntos IPSET",
-        f"# Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-    ]
-    for key, ips in resolved.items():
-        set_name = f"PM_{key.upper()}"
-        lines.append(f"create {set_name} hash:ip family inet hashsize 1024 maxelem 65536 -exist")
-        lines.append(f"flush {set_name}")
-        for ip in ips:
-            lines.append(f"add {set_name} {ip}")
-        lines.append("")
-    return "\n".join(lines)

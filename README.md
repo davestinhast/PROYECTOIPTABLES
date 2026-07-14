@@ -98,9 +98,11 @@ que indica cuáles están configurados y cuáles faltan. También muestra
 estadísticas rápidas y los últimos paquetes rechazados.
 
 ### Bloqueo de sitios web
-Activa o desactiva el bloqueo de Facebook, YouTube y Hotmail.
-La aplicación resuelve los dominios a IPs automáticamente y genera
-reglas para bloquear TCP 80, TCP 443 y UDP 443 (QUIC).
+Activa o desactiva el bloqueo de Facebook, YouTube y Hotmail/Outlook.
+La aplicación resuelve los dominios a IPs automáticamente y carga sets de **ipset**
+(`PM_FACEBOOK`, `PM_YOUTUBE`, `PM_HOTMAIL`). Las reglas iptables referencian esos sets,
+permitiendo actualizar las IPs bloqueadas sin recargar iptables (importante porque
+los CDN de estos sitios cambian constantemente). Bloquea TCP 80 y TCP 443.
 
 ### Control cliente / servidor
 Bloquea las conexiones nuevas que el cliente intenta iniciar hacia el servidor.
@@ -150,11 +152,16 @@ Cuando todos los pasos del dashboard estén configurados, pulsa
 **"Aplicar reglas"** en la barra inferior. La aplicación:
 
 1. Resuelve los dominios bloqueados a IPs actuales
-2. Genera el archivo de reglas completo
-3. Valida con `iptables-restore --test` sin aplicar nada
-4. Crea una copia de seguridad de las reglas anteriores
-5. Escribe el archivo en `/opt/proyecto-m/rules/project_m.rules.v4`
-6. Aplica las reglas con `iptables-restore`
+2. Carga los sets de **ipset** (`PM_FACEBOOK`, `PM_YOUTUBE`, `PM_HOTMAIL`) con esas IPs
+3. Guarda el archivo ipset en `/opt/proyecto-m/rules/project_m.ipset`
+4. Genera el archivo de reglas completo (con referencias a los sets, no IPs hardcodeadas)
+5. Valida con `iptables-restore --test` sin aplicar nada
+6. Crea una copia de seguridad de las reglas anteriores
+7. Escribe el archivo en `/opt/proyecto-m/rules/project_m.rules.v4`
+8. Aplica las reglas con `iptables-restore`
+
+Para actualizar las IPs de los sitios bloqueados sin recargar iptables, usa el botón
+**"Actualizar IPs bloqueadas"** en la pestaña de Sitios Web.
 
 ---
 

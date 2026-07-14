@@ -1,5 +1,13 @@
 """
 Aplica, valida y restaura reglas iptables.
+
+FLUJO DE APLICACIÓN:
+  1. Resolver dominios → IPs (domain_service.resolve_all_domains)
+  2. Aplicar ipset sets → PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL (domain_service.apply_ipset)
+  3. Generar archivo .rules.v4 con referencias a esos sets (rules_builder.build_rules)
+  4. Validar con iptables-restore --test
+  5. Escribir archivo personalizado en /opt/proyecto-m/rules/project_m.rules.v4
+  6. Aplicar con iptables-restore
 """
 
 import shutil
@@ -7,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from app.core import command_runner, rules_builder
 from app.core.platform_detector import get_mode
-from app.constants import LINUX_RULES_FILE, LINUX_RULES_BACKUP_DIR
+from app.constants import LINUX_RULES_FILE, LINUX_RULES_BACKUP_DIR, LINUX_IPSET_FILE
 
 
 def validate_rules(rules_content: str) -> tuple[bool, str]:
@@ -20,42 +28,100 @@ def validate_rules(rules_content: str) -> tuple[bool, str]:
     return False, stderr.strip() or "Error desconocido en iptables-restore --test"
 
 
-def apply_rules(rules_content: str, rules_path: str = LINUX_RULES_FILE) -> tuple[bool, str]:
+def apply_rules(
+    rules_content: str,
+    rules_path: str = "",
+    resolved: dict | None = None,
+) -> tuple[bool, str]:
     """
-    1. Activa ip_forward (necesario para rutear tráfico entre PCs)
-    2. Valida
-    3. Crea backup
-    4. Escribe archivo
-    5. Aplica
-    6. Retorna (ok, mensaje)
+    1. Activa ip_forward
+    2. Aplica ipset sets (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL)
+    3. Valida las reglas iptables
+    4. Crea backup del archivo anterior
+    5. Escribe el archivo personalizado en la ruta configurada
+    6. Aplica con iptables-restore
+    7. Retorna (ok, mensaje)
+
+    Args:
+        rules_content: Contenido del archivo .rules.v4
+        rules_path:    Ruta donde guardar el archivo. Si está vacío usa LINUX_RULES_FILE.
+        resolved:      Dict de IPs resueltas para cargar en ipset.
     """
     if get_mode() == "demo":
         return False, "Modo demostración — no se pueden aplicar reglas en Windows."
 
-    # Activar reenvío de paquetes IPv4 — indispensable para el FORWARD chain
+    # Determinar ruta de guardado
+    target_path = rules_path.strip() if rules_path.strip() else LINUX_RULES_FILE
+
+    # 1. Activar reenvío de paquetes IPv4 — necesario para FORWARD chain
     from app.core.platform_detector import enable_ip_forward
     enable_ip_forward()
 
+    # 2. Aplicar ipset sets ANTES que iptables (las reglas los referencian)
+    if resolved:
+        from app.services.domain_service import apply_ipset, save_resolved_ips
+        ipset_ok, ipset_msg = apply_ipset(resolved)
+        if not ipset_ok:
+            # No es fatal: el bloqueo por IPs no funcionará pero iptables carga igual
+            pass
+        else:
+            # Guardar ipset file en disco para referencia
+            try:
+                from app.services.domain_service import build_ipset_file
+                ipset_content = build_ipset_file(resolved)
+                ipset_path = Path(LINUX_IPSET_FILE)
+                ipset_path.parent.mkdir(parents=True, exist_ok=True)
+                ipset_path.write_text(ipset_content, encoding="utf-8")
+            except Exception:
+                pass
+
+    # 3. Validar
     ok, msg = validate_rules(rules_content)
     if not ok:
         return False, f"Validación fallida: {msg}"
 
-    # Backup
-    _create_backup(rules_path)
+    # 4. Backup del archivo anterior
+    _create_backup(target_path)
 
-    # Escribir archivo
+    # 5. Escribir archivo personalizado
     try:
-        p = Path(rules_path)
+        p = Path(target_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(rules_content, encoding="utf-8")
     except Exception as e:
-        return False, f"No se pudo escribir {rules_path}: {e}"
+        return False, f"No se pudo escribir {target_path}: {e}"
 
-    # Aplicar
+    # 6. Aplicar
     rc, stdout, stderr = command_runner.run_iptables_restore(rules_content)
     if rc == 0:
-        return True, f"Reglas aplicadas correctamente. ({rules_builder.get_rule_count(rules_content)} reglas)"
+        rule_count = rules_builder.get_rule_count(rules_content)
+        return True, (
+            f"Reglas aplicadas correctamente. "
+            f"({rule_count} reglas en {target_path})"
+        )
     return False, stderr.strip() or "Error al aplicar reglas."
+
+
+def refresh_ipset(config: dict) -> tuple[bool, str]:
+    """
+    Actualiza los sets de ipset resolviendo los dominios de nuevo,
+    SIN necesidad de recargar iptables.
+    Útil para cuando las IPs de Facebook/YouTube/Hotmail cambian.
+    """
+    if get_mode() == "demo":
+        return False, "Modo demostración."
+
+    from app.services.domain_service import resolve_all_domains, apply_ipset
+    blocked = config.get("blocked_domains", {})
+    if not any(v.get("enabled", False) for v in blocked.values()):
+        return False, "No hay sitios habilitados para actualizar."
+
+    try:
+        resolved = resolve_all_domains(blocked)
+        ok, msg = apply_ipset(resolved)
+        return ok, msg
+    except Exception as e:
+        return False, f"Error al actualizar IPs: {e}"
 
 
 def restore_backup(backup_path: str) -> tuple[bool, str]:
@@ -72,7 +138,7 @@ def flush_all() -> tuple[bool, str]:
     """Elimina todas las reglas de todas las tablas de iptables (IPv4, IPv6 y nftables)."""
     if get_mode() == "demo":
         return False, "Modo demostración."
-    
+
     # 1. Limpiar IPv4 (iptables)
     rc, _, err = command_runner.run_iptables(["-F"])
     if rc != 0:
@@ -95,9 +161,9 @@ def flush_all() -> tuple[bool, str]:
     command_runner.run(["ip6tables", "-P", "FORWARD", "ACCEPT"])
     command_runner.run(["ip6tables", "-P", "OUTPUT", "ACCEPT"])
 
-    # 3. Vaciar nftables (por si hay reglas modernas de otros laboratorios bloqueando)
+    # 3. Vaciar nftables (por si hay reglas modernas de otros laboratorios)
     command_runner.run(["nft", "flush", "ruleset"])
-    
+
     return True, "Todas las reglas del sistema (IPv4, IPv6 y nftables) han sido eliminadas."
 
 
@@ -154,9 +220,16 @@ PM_WEBBLOCK all  --  anywhere             anywhere
 
 Chain OUTPUT (policy ACCEPT)
 target     prot opt source               destination
+PM_WEBBLOCK all  --  anywhere             anywhere
 
 Chain PM_REJECT (2 references)
 LOG        all  --  anywhere             anywhere   LOG level warning prefix "PM-DROP "
 DROP       all  --  anywhere             anywhere
+
+Chain PM_WEBBLOCK (2 references)
+target     prot opt source               destination
+PM_REJECT  tcp  --  anywhere             anywhere   match-set PM_FACEBOOK dst tcp dpt:443
+PM_REJECT  tcp  --  anywhere             anywhere   match-set PM_YOUTUBE dst tcp dpt:443
+PM_REJECT  tcp  --  anywhere             anywhere   match-set PM_HOTMAIL dst tcp dpt:443
 
 [MODO DEMOSTRACIÓN — reglas simuladas]"""

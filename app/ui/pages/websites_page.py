@@ -1,17 +1,17 @@
 """
-Pantalla 2 — Bloqueo de sitios web
+Pantalla 1 — Bloqueo de sitios web
+Bloquea acceso a Facebook, YouTube y Hotmail mediante ipset + iptables.
 """
 
-import socket
 import subprocess
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QScrollArea, QPushButton, QApplication, QGridLayout,
+    QScrollArea, QPushButton, QApplication,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtWidgets import QCheckBox
-from app.constants import BLOCKED_DOMAINS
+from app.constants import BLOCKED_DOMAINS, LINUX_RULES_FILE, IPSET_SET_PREFIX
 
 
 # ─── WORKERS ─────────────────────────────────────────────────────────────────
@@ -25,218 +25,144 @@ class _EnableIPForwardWorker(QThread):
         self.finished.emit(ok)
 
 
-class _FullCheckWorker(QThread):
-    finished = Signal(str, int, int, bool)  # key, ip_count, rule_count, reachable
+class _CheckSiteWorker(QThread):
+    """Verifica cuántas IPs tiene el ipset set y si el sitio es accesible."""
+    finished = Signal(str, int, bool)  # key, ip_count_in_set, reachable
 
-    def __init__(self, key: str, domains: list):
+    def __init__(self, key: str, domain: str):
         super().__init__()
         self._key = key
-        self._domains = domains
+        self._domain = domain
 
     def run(self):
-        from app.services import domain_service
+        set_name = f"{IPSET_SET_PREFIX}{self._key.upper()}"
 
-        ips = set()
-        for d in self._domains:
-            ips.update(domain_service.resolve_domain(d))
-        ip_count = len(ips)
-
-        rule_count = 0
+        # Contar IPs en el ipset set
+        ip_count = 0
         try:
             result = subprocess.run(
-                ["iptables", "-L", "PM_WEBBLOCK", "-n"],
-                capture_output=True, text=True, timeout=5
+                ["ipset", "list", set_name, "-terse"],
+                capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
-                rule_count = sum(
-                    1 for line in result.stdout.splitlines()
-                    if "PM_REJECT" in line or "DROP" in line
-                )
+                for line in result.stdout.splitlines():
+                    if line.startswith("Number of entries:"):
+                        ip_count = int(line.split(":")[1].strip())
+                        break
         except Exception:
-            rule_count = -1
+            ip_count = -1  # ipset no disponible o set no existe
 
+        # Verificar accesibilidad TCP (puerto 443)
+        import socket
         reachable = False
-        try:
-            domain = self._domains[0] if self._domains else ""
-            if domain:
+        if self._domain:
+            try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(4)
-                s.connect((domain, 443))
+                s.settimeout(3)
+                s.connect((self._domain, 443))
                 s.close()
                 reachable = True
-        except Exception:
-            reachable = False
+            except Exception:
+                reachable = False
 
-        self.finished.emit(self._key, ip_count, rule_count, reachable)
+        self.finished.emit(self._key, ip_count, reachable)
 
 
-# ─── PREREQ CARD ─────────────────────────────────────────────────────────────
+class _RefreshIpsetWorker(QThread):
+    progress = Signal(str)
+    finished = Signal(bool, str)
 
-class _PrereqCard(QFrame):
-    """Muestra y resuelve los requisitos para que el bloqueo funcione en clientes."""
+    def __init__(self, config: dict):
+        super().__init__()
+        self._config = config
+
+    def run(self):
+        from app.services import firewall_service
+        self.progress.emit("Resolviendo IPs actuales...")
+        ok, msg = firewall_service.refresh_ipset(self._config)
+        self.finished.emit(ok, msg)
+
+
+# ─── STATUS BAR (reemplaza la prereq card compleja) ──────────────────────────
+
+class _StatusBar(QFrame):
+    """Barra de estado simple: IP Forward + botón activar."""
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
         self._config = config
-        self._ipfwd_worker = None
+        self._worker = None
         self.setObjectName("card_accent_blue")
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(12)
 
-        # Header
-        title_row = QHBoxLayout()
-        title = QLabel("Requisitos para que el bloqueo funcione en los clientes")
-        title.setObjectName("label_subtitle")
-        title_row.addWidget(title)
-        title_row.addStretch()
-        btn_refresh = QPushButton("Verificar")
-        btn_refresh.setObjectName("btn_small")
-        btn_refresh.clicked.connect(self.refresh)
-        title_row.addWidget(btn_refresh)
-        layout.addLayout(title_row)
-
-        # ip_forward
-        ipfwd_row = QHBoxLayout()
-        self._ipfwd_lbl = QLabel("IP Forward: verificando...")
+        # IP Forward status
+        self._ipfwd_lbl = QLabel("Verificando...")
         self._ipfwd_lbl.setObjectName("label_secondary")
-        ipfwd_row.addWidget(self._ipfwd_lbl, stretch=1)
-        self._btn_enable_ipfwd = QPushButton("Activar ahora")
+        layout.addWidget(self._ipfwd_lbl)
+
+        self._btn_enable_ipfwd = QPushButton("Activar IP Forward")
         self._btn_enable_ipfwd.setObjectName("btn_success")
         self._btn_enable_ipfwd.setVisible(False)
-        self._btn_enable_ipfwd.clicked.connect(self._on_enable_ipfwd)
-        ipfwd_row.addWidget(self._btn_enable_ipfwd)
-        layout.addLayout(ipfwd_row)
+        self._btn_enable_ipfwd.clicked.connect(self._on_enable)
+        layout.addWidget(self._btn_enable_ipfwd)
 
-        # MASQUERADE
-        self._masq_lbl = QLabel("NAT MASQUERADE: verificando...")
-        self._masq_lbl.setObjectName("label_secondary")
-        layout.addWidget(self._masq_lbl)
+        layout.addStretch()
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        layout.addWidget(sep)
+        # Mostrar ruta del archivo de reglas
+        rules_path = self._config.get("rules_file", "") or LINUX_RULES_FILE
+        path_lbl = QLabel(f"Archivo: {rules_path}")
+        path_lbl.setObjectName("label_hint")
+        layout.addWidget(path_lbl)
 
-        # Gateway instructions
-        gw_title = QLabel("Configurar gateway en los clientes (obligatorio)")
-        gw_title.setObjectName("label_subtitle")
-        layout.addWidget(gw_title)
-
-        gw_desc = QLabel(
-            "Para que iptables filtre el tráfico de los clientes, "
-            "cada PC cliente debe tener la IP de esta máquina Kali como puerta de enlace. "
-            "Sin eso el tráfico no pasa por aquí y el bloqueo no tiene efecto."
+        # Botón copiar comando de gateway
+        srv_ip = self._config.get("server_ip", "") or "X.X.X.X"
+        self._gw_cmd = f"sudo ip route add default via {srv_ip}"
+        btn_copy_gw = QPushButton("Copiar cmd gateway")
+        btn_copy_gw.setObjectName("btn_small")
+        btn_copy_gw.setToolTip(
+            f"Ejecutar en los PCs cliente para configurar gateway:\n{self._gw_cmd}"
         )
-        gw_desc.setObjectName("label_secondary")
-        gw_desc.setWordWrap(True)
-        layout.addWidget(gw_desc)
-
-        gw_grid = QGridLayout()
-        gw_grid.setSpacing(8)
-        gw_grid.setColumnStretch(1, 1)
-
-        win_lbl = QLabel("Windows")
-        win_lbl.setObjectName("label_hint")
-        self._gw_win_cmd = QLabel("—")
-        self._gw_win_cmd.setWordWrap(True)
-        self._gw_win_cmd.setStyleSheet(
-            "background-color: #0d0d0d; color: #cccccc; "
-            "font-family: 'Consolas','Courier New',monospace; font-size: 11px; "
-            "border: 1px solid #222222; border-radius: 4px; padding: 6px 10px;"
+        btn_copy_gw.clicked.connect(
+            lambda: QApplication.clipboard().setText(self._gw_cmd)
         )
-        btn_copy_win = QPushButton("Copiar")
-        btn_copy_win.setObjectName("btn_small")
-        btn_copy_win.clicked.connect(lambda: QApplication.clipboard().setText(self._gw_win_cmd.text()))
-
-        lin_lbl = QLabel("Linux")
-        lin_lbl.setObjectName("label_hint")
-        self._gw_lin_cmd = QLabel("—")
-        self._gw_lin_cmd.setStyleSheet(
-            "background-color: #0d0d0d; color: #22c55e; "
-            "font-family: 'Consolas','Courier New',monospace; font-size: 11px; "
-            "border: 1px solid #222222; border-radius: 4px; padding: 6px 10px;"
-        )
-        btn_copy_lin = QPushButton("Copiar")
-        btn_copy_lin.setObjectName("btn_small")
-        btn_copy_lin.clicked.connect(lambda: QApplication.clipboard().setText(self._gw_lin_cmd.text()))
-
-        gw_grid.addWidget(win_lbl,       0, 0)
-        gw_grid.addWidget(self._gw_win_cmd, 0, 1)
-        gw_grid.addWidget(btn_copy_win,  0, 2)
-        gw_grid.addWidget(lin_lbl,       1, 0)
-        gw_grid.addWidget(self._gw_lin_cmd, 1, 1)
-        gw_grid.addWidget(btn_copy_lin,  1, 2)
-        layout.addLayout(gw_grid)
+        layout.addWidget(btn_copy_gw)
 
         self.refresh()
 
     def refresh(self):
         from app.core.platform_detector import is_linux, has_ip_forward
-
         if is_linux():
-            ipfwd = has_ip_forward()
-            if ipfwd:
-                self._ipfwd_lbl.setText("✓  IP Forward: activo — Kali reenvía paquetes entre interfaces")
+            if has_ip_forward():
+                self._ipfwd_lbl.setText("✓  IP Forward activo")
                 self._ipfwd_lbl.setStyleSheet("color: #22c55e; font-size: 12px; background: transparent;")
                 self._btn_enable_ipfwd.setVisible(False)
             else:
-                self._ipfwd_lbl.setText("✗  IP Forward: INACTIVO — los paquetes no se reenvían")
-                self._ipfwd_lbl.setStyleSheet("color: #ff5555; font-size: 12px; background: transparent;")
+                self._ipfwd_lbl.setText("✗  IP Forward INACTIVO — el bloqueo no funcionará en clientes")
+                self._ipfwd_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 600; background: transparent;")
                 self._btn_enable_ipfwd.setVisible(True)
         else:
-            self._ipfwd_lbl.setText("—  IP Forward: no aplica (modo demo)")
-            self._ipfwd_lbl.setStyleSheet("color: #888888; font-size: 12px; background: transparent;")
+            self._ipfwd_lbl.setText("— Modo demo (IP Forward no aplica)")
+            self._ipfwd_lbl.setStyleSheet("color: #6b7585; font-size: 12px; background: transparent;")
 
-        if is_linux():
-            masq = False
-            try:
-                r = subprocess.run(
-                    ["iptables", "-t", "nat", "-L", "POSTROUTING", "-n"],
-                    capture_output=True, text=True, timeout=5
-                )
-                masq = "MASQUERADE" in r.stdout
-            except Exception:
-                masq = False
-            if masq:
-                self._masq_lbl.setText("✓  NAT MASQUERADE: activo — los clientes pueden salir a Internet a través de Kali")
-                self._masq_lbl.setStyleSheet("color: #22c55e; font-size: 12px; background: transparent;")
-            else:
-                self._masq_lbl.setText("✗  NAT MASQUERADE: falta — aplica las reglas primero (botón 'Aplicar reglas')")
-                self._masq_lbl.setStyleSheet("color: #f59e0b; font-size: 12px; background: transparent;")
-        else:
-            self._masq_lbl.setText("—  NAT MASQUERADE: no aplica (modo demo)")
-            self._masq_lbl.setStyleSheet("color: #8AAABB; font-size: 12px; background: transparent;")
-
-        srv_ip = self._config.get("server_ip", "") or "X.X.X.X"
-        self._gw_win_cmd.setText(
-            f"Panel de control → Adaptador de red → TCP/IPv4 → "
-            f"Puerta de enlace predeterminada: {srv_ip}"
-        )
-        self._gw_lin_cmd.setText(f"sudo ip route add default via {srv_ip}")
-
-    def _on_enable_ipfwd(self):
+    def _on_enable(self):
         self._btn_enable_ipfwd.setEnabled(False)
         self._btn_enable_ipfwd.setText("Activando...")
-        self._ipfwd_worker = _EnableIPForwardWorker()
-        self._ipfwd_worker.finished.connect(self._on_ipfwd_done)
-        self._ipfwd_worker.start()
+        self._worker = _EnableIPForwardWorker()
+        self._worker.finished.connect(self._on_done)
+        self._worker.start()
 
-    def _on_ipfwd_done(self, ok: bool):
+    def _on_done(self, ok: bool):
         self._btn_enable_ipfwd.setEnabled(True)
-        self._btn_enable_ipfwd.setText("Activar ahora")
+        self._btn_enable_ipfwd.setText("Activar IP Forward")
         self.refresh()
 
     def update_config(self, config: dict):
         self._config = config
-        srv_ip = config.get("server_ip", "") or "X.X.X.X"
-        self._gw_win_cmd.setText(
-            f"Panel de control → Adaptador de red → TCP/IPv4 → "
-            f"Puerta de enlace predeterminada: {srv_ip}"
-        )
-        self._gw_lin_cmd.setText(f"sudo ip route add default via {srv_ip}")
 
 
 # ─── SITE CARD ───────────────────────────────────────────────────────────────
@@ -254,74 +180,74 @@ class SiteCard(QFrame):
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(20, 14, 20, 14)
+        main_layout.setSpacing(10)
 
-        content_row = QHBoxLayout()
-        content_row.setSpacing(16)
+        # ── Fila superior: nombre + toggle + botón verificar ──
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
 
-        # Left Info
-        left_layout = QVBoxLayout()
+        # Nombre del sitio
         label_name = QLabel(self._cfg["label"])
-        label_name.setObjectName("label_subtitle")
-        left_layout.addWidget(label_name)
+        label_name.setObjectName("label_title")
+        label_name.setStyleSheet("font-size: 15px; font-weight: 700; color: #e8eaf0; background: transparent;")
+        top_row.addWidget(label_name)
 
-        self._badge = QLabel("⚪ Sin verificar")
-        self._badge.setStyleSheet("font-size: 11px; font-weight: bold; background: transparent;")
-        left_layout.addWidget(self._badge)
-        left_layout.addStretch()
-        content_row.addLayout(left_layout, stretch=1)
-
-        # Middle Info
-        mid_layout = QVBoxLayout()
+        # Descripción
         desc = QLabel(self._cfg.get("description", ""))
-        desc.setObjectName("label_hint")
-        mid_layout.addWidget(desc)
+        desc.setObjectName("label_secondary")
+        top_row.addWidget(desc, stretch=1)
 
-        domains_lbl = QLabel(", ".join(self._cfg.get("domains", [])))
-        domains_lbl.setObjectName("label_secondary")
-        domains_lbl.setWordWrap(True)
-        mid_layout.addWidget(domains_lbl)
-        mid_layout.addStretch()
-        content_row.addLayout(mid_layout, stretch=3)
-
-        # Right Controls
-        right_layout = QVBoxLayout()
-        self._toggle = QCheckBox("Habilitar")
+        # Toggle
+        self._toggle = QCheckBox("Habilitar bloqueo")
         self._toggle.setChecked(self._cfg.get("enabled", False))
         self._toggle.toggled.connect(lambda checked: self.toggled.emit(self._key, checked))
-        right_layout.addWidget(self._toggle, alignment=Qt.AlignmentFlag.AlignRight)
+        self._toggle.setStyleSheet("font-weight: 600; color: #c0c8d8; background: transparent;")
+        top_row.addWidget(self._toggle)
 
+        # Botón verificar
         self._btn_check = QPushButton("Verificar")
         self._btn_check.setObjectName("btn_small")
         self._btn_check.clicked.connect(lambda: self.check_requested.emit(self._key))
-        right_layout.addWidget(self._btn_check, alignment=Qt.AlignmentFlag.AlignRight)
-        content_row.addLayout(right_layout, stretch=1)
+        top_row.addWidget(self._btn_check)
 
-        main_layout.addLayout(content_row)
+        main_layout.addLayout(top_row)
 
-        # Separator line
+        # ── Separador ──
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #222222; background-color: #222222; max-height: 1px;")
         main_layout.addWidget(sep)
 
-        # Detail/Status row (Bottom)
-        detail_row = QHBoxLayout()
-        self._ip_label = QLabel("IPs: —")
-        self._ip_label.setObjectName("label_mono")
-        detail_row.addWidget(self._ip_label)
+        # ── Fila inferior: estado del set ipset + accesibilidad ──
+        status_row = QHBoxLayout()
+        status_row.setSpacing(20)
 
-        self._rules_label = QLabel("Reglas: —")
-        self._rules_label.setObjectName("label_mono")
-        detail_row.addWidget(self._rules_label)
+        self._badge = QLabel("○  Sin verificar")
+        self._badge.setStyleSheet(
+            "color: #4a5060; font-size: 12px; font-weight: 600; background: transparent;"
+        )
+        status_row.addWidget(self._badge)
+
+        self._ipset_label = QLabel("ipset: —")
+        self._ipset_label.setObjectName("label_mono")
+        status_row.addWidget(self._ipset_label)
 
         self._reach_label = QLabel("")
         self._reach_label.setObjectName("label_secondary")
-        detail_row.addWidget(self._reach_label)
-        detail_row.addStretch()
+        status_row.addWidget(self._reach_label)
 
-        main_layout.addLayout(detail_row)
+        status_row.addStretch()
+
+        # Dominios (colapsado como texto pequeño)
+        domains_text = "  ·  ".join(self._cfg.get("domains", [])[:4])
+        if len(self._cfg.get("domains", [])) > 4:
+            domains_text += "  ..."
+        domains_lbl = QLabel(domains_text)
+        domains_lbl.setObjectName("label_mono")
+        domains_lbl.setStyleSheet("color: #3a4050; font-size: 10px; background: transparent;")
+        status_row.addWidget(domains_lbl)
+
+        main_layout.addLayout(status_row)
 
     def set_checking(self, checking: bool):
         self._btn_check.setEnabled(not checking)
@@ -331,57 +257,64 @@ class SiteCard(QFrame):
                 "color: #f59e0b; font-size: 12px; font-weight: 600; background: transparent;"
             )
 
-    def set_check_result(self, ip_count: int, rule_count: int, reachable: bool):
-        ts = datetime.now().strftime("%H:%M:%S")
-        self._ip_label.setText(f"IPs resueltas: {ip_count}   ({ts})")
+    def set_check_result(self, ip_count: int, reachable: bool):
+        """
+        ip_count: -1 = ipset no disponible / set no existe
+                   0 = set existe pero vacío (reglas no aplicadas)
+                  >0 = set con IPs cargadas
+        reachable: True si la conexión TCP:443 al dominio fue exitosa
+        """
+        ts = datetime.now().strftime("%H:%M")
 
-        if rule_count == -1:
-            self._badge.setText("⚪  No disponible (modo demo)")
+        if ip_count == -1:
+            # ipset no disponible (modo demo o sin root)
+            self._badge.setText("○  No disponible (modo demo)")
             self._badge.setStyleSheet(
-                "color: #888888; font-size: 11px; font-weight: 600; background: transparent;"
+                "color: #4a5060; font-size: 12px; font-weight: 600; background: transparent;"
             )
-            self._rules_label.setStyleSheet(
-                "color: #888888; font-size: 11px; background: transparent;"
-            )
-            self._rules_label.setText("Reglas: —")
+            self._ipset_label.setText(f"ipset: — ({ts})")
+            self._ipset_label.setStyleSheet("color: #4a5060; font-size: 11px; background: transparent;")
             self._reach_label.setText("")
-        elif rule_count == 0:
-            self._badge.setText("🟢  ACCESIBLE")
+        elif ip_count == 0:
+            # Set vacío o no existe → bloqueo inactivo
+            self._badge.setText("🟡  INACTIVO — aplica las reglas primero")
             self._badge.setStyleSheet(
-                "color: #22c55e; font-size: 11px; font-weight: 600; background: transparent;"
+                "color: #f59e0b; font-size: 12px; font-weight: 600; background: transparent;"
             )
-            self._rules_label.setStyleSheet(
-                "color: #ff5555; font-weight: 600; font-size: 11px; background: transparent;"
-            )
-            self._rules_label.setText("Reglas: 0 (inactivas)")
-        else:
-            self._badge.setText("🔴  BLOQUEADO")
-            self._badge.setStyleSheet(
-                "color: #ff5555; font-size: 11px; font-weight: 600; background: transparent;"
-            )
-            self._rules_label.setStyleSheet(
-                "color: #22c55e; font-weight: 600; font-size: 11px; background: transparent;"
-            )
-            self._rules_label.setText(f"Reglas: {rule_count} (activas)")
-
-        if rule_count != -1:
+            self._ipset_label.setText(f"ipset: 0 IPs cargadas ({ts})")
+            self._ipset_label.setStyleSheet("color: #f59e0b; font-size: 11px; background: transparent;")
             if reachable:
-                self._reach_label.setStyleSheet(
-                    "color: #ffaa00; font-size: 11px; background: transparent;"
-                )
-                self._reach_label.setText(
-                    "|   Desde Kali: alcanzable (el bloqueo es para clientes)"
-                )
+                self._reach_label.setStyleSheet("color: #ef4444; font-size: 11px; background: transparent;")
+                self._reach_label.setText("TCP 443: accesible (sin bloqueo)")
             else:
-                self._reach_label.setStyleSheet(
-                    "color: #888888; font-size: 11px; background: transparent;"
+                self._reach_label.setText("")
+        else:
+            # Set con IPs → bloqueo activo
+            if reachable:
+                # Hay IPs en el set pero el sitio responde → puede ser que Kali no sea el gateway
+                self._badge.setText("🟠  PARCIAL — set cargado pero sitio alcanzable desde Kali")
+                self._badge.setStyleSheet(
+                    "color: #f97316; font-size: 12px; font-weight: 600; background: transparent;"
                 )
-                self._reach_label.setText("|   Desde Kali: sin respuesta TCP 443")
+                self._reach_label.setStyleSheet("color: #f97316; font-size: 11px; background: transparent;")
+                self._reach_label.setText("Kali también es cliente — normal si OUTPUT no bloquea a Kali")
+            else:
+                self._badge.setText("🔴  BLOQUEADO")
+                self._badge.setStyleSheet(
+                    "color: #ef4444; font-size: 12px; font-weight: 600; background: transparent;"
+                )
+                self._reach_label.setStyleSheet("color: #22c55e; font-size: 11px; background: transparent;")
+                self._reach_label.setText("TCP 443: bloqueado ✓")
+
+            self._ipset_label.setText(f"ipset: {ip_count} IPs bloqueadas ({ts})")
+            self._ipset_label.setStyleSheet("color: #22c55e; font-size: 11px; background: transparent;")
 
         self._btn_check.setEnabled(True)
 
     def set_enabled(self, enabled: bool):
+        self._toggle.blockSignals(True)
         self._toggle.setChecked(enabled)
+        self._toggle.blockSignals(False)
 
 
 # ─── PAGE ────────────────────────────────────────────────────────────────────
@@ -394,6 +327,7 @@ class WebsitesPage(QWidget):
         self._config = config
         self._workers: list   = []
         self._checking: set   = set()
+        self._refresh_worker  = None
 
         self._auto_timer = QTimer(self)
         self._auto_timer.setInterval(30_000)
@@ -412,28 +346,63 @@ class WebsitesPage(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
+        # ── Título y botones de acción ──
         title_row = QHBoxLayout()
-        title = QLabel("Bloqueo de sitios web")
+        title = QLabel("Bloqueo de Sitios Web")
         title.setObjectName("label_title")
         title_row.addWidget(title)
         title_row.addStretch()
-        
-        btn_repair = QPushButton("Restaurar Red")
-        btn_repair.setObjectName("btn_apply")
-        btn_repair.clicked.connect(self._repair_network)
-        title_row.addWidget(btn_repair)
-        
+
+        btn_refresh_ips = QPushButton("↻  Actualizar IPs bloqueadas")
+        btn_refresh_ips.setObjectName("btn_secondary")
+        btn_refresh_ips.setToolTip(
+            "Resuelve los dominios de nuevo y actualiza los sets de ipset.\n"
+            "Útil cuando las IPs de Facebook/YouTube/Hotmail cambian (CDN).\n"
+            "No necesita recargar las reglas iptables."
+        )
+        btn_refresh_ips.clicked.connect(self._on_refresh_ips)
+        title_row.addWidget(btn_refresh_ips)
+        self._btn_refresh_ips = btn_refresh_ips
+
         btn_verify_all = QPushButton("Verificar todos")
         btn_verify_all.setObjectName("btn_secondary")
         btn_verify_all.clicked.connect(self._verify_all)
         title_row.addWidget(btn_verify_all)
+
+        btn_flush = QPushButton("Limpiar todas las reglas")
+        btn_flush.setObjectName("btn_danger")
+        btn_flush.setToolTip(
+            "Elimina TODAS las reglas iptables activas del sistema.\n"
+            "Úsalo para restaurar la conectividad si algo falla."
+        )
+        btn_flush.clicked.connect(self._flush_rules)
+        title_row.addWidget(btn_flush)
+
         layout.addLayout(title_row)
 
-        self._prereq_card = _PrereqCard(self._config)
-        layout.addWidget(self._prereq_card)
+        # ── Barra de estado (IP Forward, ruta archivo) ──
+        self._status_bar = _StatusBar(self._config)
+        layout.addWidget(self._status_bar)
 
+        # ── Descripción ──
+        info = QLabel(
+            "Activa los sitios que querés bloquear y presioná "
+            "<b>Aplicar reglas</b> en la barra inferior. "
+            "El bloqueo aplica para todos los equipos que tengan a Kali como puerta de enlace (gateway)."
+        )
+        info.setObjectName("label_secondary")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        # ── Status de actualización ──
+        self._refresh_status = QLabel("")
+        self._refresh_status.setObjectName("label_secondary")
+        self._refresh_status.setVisible(False)
+        layout.addWidget(self._refresh_status)
+
+        # ── Cards por sitio ──
         blocked = self._config.get("blocked_domains", BLOCKED_DOMAINS)
         self._site_cards: dict = {}
         for key, cfg in blocked.items():
@@ -449,7 +418,7 @@ class WebsitesPage(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._prereq_card.refresh()
+        self._status_bar.refresh()
         self._verify_all()
         if not self._auto_timer.isActive():
             self._auto_timer.start()
@@ -483,32 +452,68 @@ class WebsitesPage(QWidget):
             .get(key, {})
             .get("domains", [])
         )
-        worker = _FullCheckWorker(key, domains)
+        primary_domain = domains[0] if domains else ""
+        worker = _CheckSiteWorker(key, primary_domain)
         worker.finished.connect(self._on_check_done)
         self._workers.append(worker)
         worker.start()
 
-    def _on_check_done(self, key: str, ip_count: int, rule_count: int, reachable: bool):
+    def _on_check_done(self, key: str, ip_count: int, reachable: bool):
         self._checking.discard(key)
         self._workers = [w for w in self._workers if w.isRunning()]
         card = self._site_cards.get(key)
         if card:
-            card.set_check_result(ip_count, rule_count, reachable)
+            card.set_check_result(ip_count, reachable)
 
-    def _repair_network(self):
+    def _on_refresh_ips(self):
+        if self._refresh_worker and self._refresh_worker.isRunning():
+            return
+        self._btn_refresh_ips.setEnabled(False)
+        self._btn_refresh_ips.setText("Actualizando...")
+        self._refresh_status.setText("Resolviendo IPs actuales de los dominios bloqueados...")
+        self._refresh_status.setStyleSheet("color: #f59e0b; background: transparent;")
+        self._refresh_status.setVisible(True)
+
+        self._refresh_worker = _RefreshIpsetWorker(self._config)
+        self._refresh_worker.progress.connect(
+            lambda msg: self._refresh_status.setText(msg)
+        )
+        self._refresh_worker.finished.connect(self._on_refresh_done)
+        self._refresh_worker.start()
+
+    def _on_refresh_done(self, ok: bool, msg: str):
+        self._btn_refresh_ips.setEnabled(True)
+        self._btn_refresh_ips.setText("↻  Actualizar IPs bloqueadas")
+        if ok:
+            self._refresh_status.setText(f"✓  {msg}")
+            self._refresh_status.setStyleSheet("color: #22c55e; background: transparent;")
+        else:
+            self._refresh_status.setText(f"✗  {msg}")
+            self._refresh_status.setStyleSheet("color: #ef4444; background: transparent;")
+        self._verify_all()
+
+    def _flush_rules(self):
         from app.services import firewall_service
         from PySide6.QtWidgets import QMessageBox
-        
+        reply = QMessageBox.warning(
+            self, "Limpiar todas las reglas",
+            "Esto eliminará TODAS las reglas iptables activas del sistema.\n"
+            "Los sitios bloqueados volverán a ser accesibles.\n\n¿Continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         ok, msg = firewall_service.flush_all()
         if ok:
-            QMessageBox.information(self, "Red Restaurada", "Se han limpiado todas las reglas del sistema (incluyendo tablas NAT/Mangle).\nVerificando conectividad...")
+            QMessageBox.information(self, "Reglas eliminadas", msg)
             self._verify_all()
         else:
-            QMessageBox.warning(self, "Error", f"No se pudo limpiar la red: {msg}")
+            QMessageBox.warning(self, "Error", f"No se pudo limpiar: {msg}")
 
     def update_config(self, config: dict):
         self._config = config
-        self._prereq_card.update_config(config)
+        self._status_bar.update_config(config)
         blocked = config.get("blocked_domains", {})
         for key, card in self._site_cards.items():
             if key in blocked:

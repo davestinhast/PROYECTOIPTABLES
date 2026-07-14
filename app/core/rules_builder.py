@@ -1,6 +1,14 @@
 """
 Genera el archivo iptables-restore desde la configuración JSON.
 Produce un archivo .v4 listo para: iptables-restore < project_m.rules.v4
+
+ESTRATEGIA DE BLOQUEO DE SITIOS WEB:
+  - Se usan ipset sets (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL) en lugar de IPs
+    hardcodeadas, ya que los CDN de estos sitios cambian constantemente.
+  - El bloqueo aplica tanto en FORWARD (tráfico de clientes) como en OUTPUT
+    (tráfico de la propia máquina Kali).
+  - NO se usa string match (-m string) porque HTTPS cifra el contenido y
+    la cadena "facebook.com" no aparece en texto plano.
 """
 
 from datetime import datetime
@@ -8,7 +16,7 @@ from app.constants import (
     IPTABLES_CHAIN_REJECT, IPTABLES_LOG_PREFIX, IPTABLES_LOG_LIMIT,
     IPTABLES_LOG_LEVEL, CHAIN_WEBBLOCK, CHAIN_MACBLOCK,
     CHAIN_CONNLIMIT, CHAIN_CLISRV, APP_NAME, APP_VERSION,
-    WEB_BLOCK_PORTS, WEB_BLOCK_UDP_PORTS,
+    WEB_BLOCK_PORTS, IPSET_SET_PREFIX,
 )
 
 
@@ -17,6 +25,10 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
     config: dict de configuración
     resolved_ips: {"facebook": ["157.240.0.1", ...], "youtube": [...], "hotmail": [...]}
     Retorna el contenido del archivo .rules.v4
+
+    NOTA: Los sets de ipset (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL) deben haber sido
+    cargados antes con: ipset restore < project_m.ipset
+    Las reglas iptables de este archivo solo referencian los sets, no las IPs directamente.
     """
     lines = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -25,15 +37,16 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
     lan = config.get("interfaces", {}).get("lan", "")
 
     lines += [
-        f"# {APP_NAME} v{APP_VERSION} — Archivo de reglas personalizado",
+        f"# {APP_NAME} v{APP_VERSION} — Archivo de reglas PERSONALIZADO",
         f"# Generado: {now}",
-        f"# NO EDITAR MANUALMENTE — generado por la aplicación",
+        f"# Guardado en: /opt/proyecto-m/rules/project_m.rules.v4",
+        f"# (NO se usa /etc/sysconfig/iptables — rúbrica requiere archivo personalizado)",
         f"# Cargar con: iptables-restore < project_m.rules.v4",
+        f"# IPs bloqueadas via ipset: ipset restore < project_m.ipset",
         "",
     ]
 
     # ── Tabla NAT: MASQUERADE para que Kali actúe como gateway/router ──────────
-    # Sin esto los clientes no pueden salir a internet a través de Kali
     lines += [
         "*nat",
         ":PREROUTING ACCEPT [0:0]",
@@ -44,7 +57,6 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
     if wan:
         lines.append(f"-A POSTROUTING -o {wan} -j MASQUERADE")
     else:
-        # Sin WAN configurada: masquerade en todas las interfaces de salida
         lines.append("-A POSTROUTING -j MASQUERADE")
     lines += ["COMMIT", ""]
 
@@ -91,10 +103,10 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
             )
         lines.append("")
 
-    # === connlimit ===
+    # === connlimit: límite de conexiones simultáneas ===
     conn_profiles = config.get("conn_profiles", [])
     if conn_profiles:
-        lines.append(f"# --- Cadena {CHAIN_CONNLIMIT}: límite de conexiones ---")
+        lines.append(f"# --- Cadena {CHAIN_CONNLIMIT}: límite de conexiones simultáneas ---")
         for p in conn_profiles:
             if not p.get("enabled", False):
                 continue
@@ -107,7 +119,7 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                 continue
             reject_flag = "--reject-with tcp-reset" if action == "REJECT" and proto == "tcp" else ""
             target = f"REJECT {reject_flag}".strip() if action == "REJECT" else "DROP"
-            lines.append(f"# connlimit: {name}")
+            lines.append(f"# connlimit: {name} (max {max_conn} conexiones en puerto {port}/{proto})")
             lines.append(
                 f"-A {CHAIN_CONNLIMIT} -p {proto} --dport {port} "
                 f"-m connlimit --connlimit-above {max_conn} --connlimit-mask 32 "
@@ -124,9 +136,9 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
         action = clisrv.get("action", "DROP")
         protocols = clisrv.get("protocols", ["tcp", "udp", "icmp"])
         if srv and cli:
-            lines.append(f"# --- Cadena {CHAIN_CLISRV}: bloqueo cliente→servidor ---")
+            lines.append(f"# --- Cadena {CHAIN_CLISRV}: bloqueo cliente→servidor (servidor sí puede enviar a cliente) ---")
             iface_flag = f"-i {iface} " if iface else ""
-            # Permitir ESTABLISHED/RELATED primero (respuestas del cliente al servidor sí)
+            # Permitir respuestas ESTABLISHED del servidor hacia el cliente
             lines.append(
                 f"-A {CHAIN_CLISRV} {iface_flag}-s {cli} -d {srv} "
                 f"-m state --state ESTABLISHED,RELATED -j ACCEPT"
@@ -139,53 +151,41 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                 )
             lines.append("")
 
-    # === Bloqueo sitios web ===
+    # === Bloqueo sitios web — usa ipset sets, NO IPs hardcodeadas ===
     blocked_domains = config.get("blocked_domains", {})
-    if blocked_domains:
-        lines.append(f"# --- Cadena {CHAIN_WEBBLOCK}: bloqueo por IP e inspección de texto ---")
+    has_webblock = any(v.get("enabled", False) for v in blocked_domains.values())
+    if has_webblock:
+        lines.append(f"# --- Cadena {CHAIN_WEBBLOCK}: bloqueo por ipset (IPs actualizables) ---")
+        lines.append(f"# Los sets PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL se cargan con:")
+        lines.append(f"# ipset restore < /opt/proyecto-m/rules/project_m.ipset")
+        lines.append("")
         for key, domain_cfg in blocked_domains.items():
             if not domain_cfg.get("enabled", False):
                 continue
             label = domain_cfg.get("label", key)
-            ips = resolved_ips.get(key, [])
-            domains = domain_cfg.get("domains", [])
-            
-            # Bloqueo por IP
-            if ips:
-                lines.append(f"# {label} ({len(ips)} IPs resueltas)")
-                for ip in ips:
-                    for port in WEB_BLOCK_PORTS:
-                        lines.append(
-                            f"-A {CHAIN_WEBBLOCK} -p tcp -d {ip} --dport {port} "
-                            f"-j {IPTABLES_CHAIN_REJECT}"
-                        )
-                    for port in WEB_BLOCK_UDP_PORTS:
-                        lines.append(
-                            f"-A {CHAIN_WEBBLOCK} -p udp -d {ip} --dport {port} "
-                            f"-j {IPTABLES_CHAIN_REJECT}"
-                        )
-            
-            # Bloqueo por String (inspección de texto plano SNI en HTTPS / Host en HTTP)
-            if domains:
-                lines.append(f"# {label} (Bloqueo por inspección de texto)")
-                for dom in domains:
-                    if len(dom) > 3:
-                        lines.append(
-                            f"-A {CHAIN_WEBBLOCK} -m string --string \"{dom}\" --algo bm "
-                            f"-j {IPTABLES_CHAIN_REJECT}"
-                        )
+            set_name = f"{IPSET_SET_PREFIX}{key.upper()}"
+            ip_count = len(resolved_ips.get(key, []))
+            lines.append(f"# {label} — set: {set_name} ({ip_count} IPs cargadas)")
+            for port in WEB_BLOCK_PORTS:
+                lines.append(
+                    f"-A {CHAIN_WEBBLOCK} -p tcp --dport {port} "
+                    f"-m set --match-set {set_name} dst "
+                    f"-j {IPTABLES_CHAIN_REJECT}"
+                )
         lines.append("")
 
-    # === Saltos desde FORWARD hacia las cadenas personalizadas ===
+    # === Saltos desde FORWARD y OUTPUT hacia las cadenas personalizadas ===
     iface_in = f"-i {lan} " if lan else ""
-    iface_out = f"-o {lan} " if lan else ""
 
     lines += [
-        "# --- Saltos FORWARD → cadenas personalizadas ---",
+        "# --- Saltos FORWARD → cadenas personalizadas (tráfico de clientes) ---",
         f"-A FORWARD {iface_in}-j {CHAIN_MACBLOCK}",
         f"-A FORWARD {iface_in}-j {CHAIN_CONNLIMIT}",
         f"-A FORWARD {iface_in}-j {CHAIN_CLISRV}",
         f"-A FORWARD {iface_in}-j {CHAIN_WEBBLOCK}",
+        "",
+        "# --- Saltos OUTPUT → PM_WEBBLOCK (bloqueo también desde la propia máquina Kali) ---",
+        f"-A OUTPUT -j {CHAIN_WEBBLOCK}",
         "",
         "COMMIT",
         "",
