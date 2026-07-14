@@ -36,7 +36,7 @@ class CliSrvPage(QWidget):
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(16)
 
-        # Titulo
+        # Titulo y activacion
         title_row = QHBoxLayout()
         title = QLabel("Control Cliente / Servidor")
         title.setObjectName("label_title")
@@ -48,37 +48,58 @@ class CliSrvPage(QWidget):
         title_row.addWidget(self._enabled_toggle)
         layout.addLayout(title_row)
 
-        # Descripcion de la regla
+        # Explicacion super intuitiva
         desc_card = QFrame()
         desc_card.setObjectName("card_accent_blue")
         desc_layout = QVBoxLayout(desc_card)
-        desc_layout.setContentsMargins(20, 14, 20, 14)
-        desc_layout.setSpacing(6)
+        desc_layout.setContentsMargins(20, 16, 20, 16)
+        desc_layout.setSpacing(12)
 
-        desc_title = QLabel("Que hace esta regla")
-        desc_title.setObjectName("label_subtitle")
+        desc_title = QLabel("¿Como funciona esta regla? (Bloqueo en un solo sentido)")
+        desc_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #3b82f6; background: transparent;")
         desc_layout.addWidget(desc_title)
 
-        desc_text = QLabel(
-            "Bloquea los paquetes nuevos (NEW) que el cliente intenta enviar al servidor.\n"
-            "El servidor SI puede enviar paquetes al cliente sin restricciones.\n"
-            "Los paquetes de respuesta (ESTABLISHED/RELATED) del cliente si son permitidos."
-        )
-        desc_text.setObjectName("label_secondary")
-        desc_text.setWordWrap(True)
-        desc_layout.addWidget(desc_text)
+        # Contenedor visual de las dos vias de comunicacion
+        flow_layout = QVBoxLayout()
+        flow_layout.setSpacing(10)
 
-        # Estado visual simple (2 lineas de texto)
-        self._status_srv_cli = QLabel("Cliente -> Servidor (NEW): BLOQUEADO")
-        self._status_srv_cli.setStyleSheet(
-            "color: #ef4444; font-weight: 600; font-size: 12px; background: transparent;"
+        # Fila 1: Servidor -> Cliente (Permitido)
+        row_ok = QHBoxLayout()
+        row_ok.setSpacing(10)
+        lbl_ok_badge = QLabel(" PERMITIDO ")
+        lbl_ok_badge.setStyleSheet(
+            "background-color: #14532d; color: #22c55e; font-weight: bold; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 11px;"
         )
-        self._status_cli_srv = QLabel("Servidor -> Cliente: PERMITIDO")
-        self._status_cli_srv.setStyleSheet(
-            "color: #22c55e; font-weight: 600; font-size: 12px; background: transparent;"
+        self._lbl_flow_ok = QLabel("Servidor Kali  --->  Dispositivo Cliente  (El servidor puede iniciar conexiones)")
+        self._lbl_flow_ok.setStyleSheet("font-size: 12px; color: #e8eaf0; background: transparent;")
+        row_ok.addWidget(lbl_ok_badge)
+        row_ok.addWidget(self._lbl_flow_ok, stretch=1)
+        flow_layout.addLayout(row_ok)
+
+        # Fila 2: Cliente -> Servidor (Bloqueado)
+        row_no = QHBoxLayout()
+        row_no.setSpacing(10)
+        lbl_no_badge = QLabel(" BLOQUEADO ")
+        lbl_no_badge.setStyleSheet(
+            "background-color: #7f1d1d; color: #f87171; font-weight: bold; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 11px;"
         )
-        desc_layout.addWidget(self._status_srv_cli)
-        desc_layout.addWidget(self._status_cli_srv)
+        self._lbl_flow_no = QLabel("Dispositivo Cliente  -x->  Servidor Kali  (El cliente NO puede iniciar conexiones nuevas)")
+        self._lbl_flow_no.setStyleSheet("font-size: 12px; color: #e8eaf0; background: transparent;")
+        row_no.addWidget(lbl_no_badge)
+        row_no.addWidget(self._lbl_flow_no, stretch=1)
+        flow_layout.addLayout(row_no)
+
+        desc_layout.addLayout(flow_layout)
+
+        # Explicacion infantil/sencilla
+        simple_explain = QLabel(
+            "Explicacion simple: Es como una puerta que solo se abre desde adentro. "
+            "El servidor puede salir a buscar al cliente, pero ningun cliente de afuera puede entrar a molestar al servidor."
+        )
+        simple_explain.setStyleSheet("font-style: italic; color: #8892a4; font-size: 11px; background: transparent;")
+        desc_layout.addWidget(simple_explain)
 
         layout.addWidget(desc_card)
 
@@ -133,11 +154,11 @@ class CliSrvPage(QWidget):
         self._action_combo.setMinimumWidth(120)
         self._action_combo.currentIndexChanged.connect(self._on_save)
 
-        form.addRow("IP del servidor:", self._srv_ip_input)
-        form.addRow("IP del cliente:", self._cli_ip_input)
+        form.addRow("IP del servidor Kali:", self._srv_ip_input)
+        form.addRow("IP o Red del cliente:", self._cli_ip_input)
         form.addRow("Interfaz LAN:", self._iface_combo)
         form.addRow("Protocolos a bloquear:", proto_widget)
-        form.addRow("Accion:", self._action_combo)
+        form.addRow("Accion al bloquear:", self._action_combo)
         config_layout.addLayout(form)
 
         # Boton autodetectar IP del servidor
@@ -215,20 +236,14 @@ class CliSrvPage(QWidget):
 
     def _update_status(self):
         enabled = self._enabled_toggle.isChecked()
-        srv = self._srv_ip_input.text().strip() or "SERVIDOR"
-        cli = self._cli_ip_input.text().strip() or "CLIENTE"
+        srv = self._srv_ip_input.text().strip() or "Servidor Kali"
+        cli = self._cli_ip_input.text().strip() or "Dispositivo Cliente"
         if enabled:
-            self._status_srv_cli.setText(f"{cli} -> {srv} (NEW): BLOQUEADO")
-            self._status_cli_srv.setText(f"{srv} -> {cli}: PERMITIDO")
+            self._lbl_flow_ok.setText(f"{srv}  --->  {cli}  (El servidor Kali si puede enviarle mensajes)")
+            self._lbl_flow_no.setText(f"{cli}  -x->  {srv}  (El cliente tiene prohibido iniciar mensajes nuevos)")
         else:
-            self._status_srv_cli.setText(f"{cli} -> {srv}: sin restricciones (regla desactivada)")
-            self._status_srv_cli.setStyleSheet(
-                "color: #6b7585; font-weight: 600; font-size: 12px; background: transparent;"
-            )
-            self._status_cli_srv.setText(f"{srv} -> {cli}: sin restricciones (regla desactivada)")
-            self._status_cli_srv.setStyleSheet(
-                "color: #6b7585; font-weight: 600; font-size: 12px; background: transparent;"
-            )
+            self._lbl_flow_ok.setText(f"{srv}  --->  {cli}  (Sin restricciones - Regla desactivada)")
+            self._lbl_flow_no.setText(f"{cli}  --->  {srv}  (Sin restricciones - Regla desactivada)")
 
     def _auto_detect_srv(self):
         ip, iface = network_service.get_own_ip_and_interface()
@@ -248,7 +263,6 @@ class CliSrvPage(QWidget):
                 self._error_label.setText(f"IP servidor: {msg}")
                 return
         if cli_text:
-            # Aceptar IP o CIDR para el cliente
             ok, msg = validators.validate_ipv4(cli_text)
             if not ok:
                 ok2, _ = validators.validate_cidr(cli_text)

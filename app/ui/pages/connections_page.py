@@ -1,7 +1,9 @@
 """
-Pantalla 5 — Límite de conexiones simultáneas (connlimit)
+Pantalla — Limite de conexiones simultaneas (connlimit)
+Explica la funcionalidad como un limite de accesos al mismo tiempo por dispositivo.
 """
 
+import copy
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QPushButton, QTableWidget, QTableWidgetItem,
@@ -10,38 +12,38 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from app.constants import DEFAULT_CONN_PROFILES
-import copy
 
 
 class AddProfileDialog(QDialog):
     def __init__(self, profile: dict = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Perfil de conexiones")
-        self.setMinimumWidth(380)
+        self.setWindowTitle("Nuevo limite de conexiones")
+        self.setMinimumWidth(400)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
 
-        title = QLabel("Configurar límite de conexiones")
+        title = QLabel("Limitar visitas de un dispositivo")
         title.setObjectName("label_subtitle")
         layout.addWidget(title)
 
         form = QFormLayout()
-        form.setSpacing(8)
+        form.setSpacing(10)
 
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("ej: SSH restringido")
+        self.name_input.setPlaceholderText("ej: SSH Seguro, Servidor Web")
 
         self.proto_combo = QComboBox()
         self.proto_combo.addItems(["tcp", "udp"])
 
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
-        self.port_spin.setValue(22)
+        self.port_spin.setValue(80)
 
         self.max_spin = QSpinBox()
         self.max_spin.setRange(1, 1000)
-        self.max_spin.setValue(3)
+        self.max_spin.setValue(5)
+        self.max_spin.setSuffix(" conexiones")
 
         self.action_combo = QComboBox()
         self.action_combo.addItems(["REJECT", "DROP"])
@@ -50,17 +52,26 @@ class AddProfileDialog(QDialog):
             self.name_input.setText(profile.get("name", ""))
             idx = self.proto_combo.findText(profile.get("proto", "tcp"))
             if idx >= 0: self.proto_combo.setCurrentIndex(idx)
-            self.port_spin.setValue(profile.get("port", 22))
-            self.max_spin.setValue(profile.get("max", 3))
+            self.port_spin.setValue(profile.get("port", 80))
+            self.max_spin.setValue(profile.get("max", 5))
             idx2 = self.action_combo.findText(profile.get("action", "REJECT"))
             if idx2 >= 0: self.action_combo.setCurrentIndex(idx2)
 
-        form.addRow("Nombre:", self.name_input)
-        form.addRow("Protocolo:", self.proto_combo)
-        form.addRow("Puerto:", self.port_spin)
-        form.addRow("Máximo conexiones:", self.max_spin)
-        form.addRow("Acción al exceder:", self.action_combo)
+        form.addRow("Nombre del perfil:", self.name_input)
+        form.addRow("Protocolo (canal):", self.proto_combo)
+        form.addRow("Puerto (puerta):", self.port_spin)
+        form.addRow("Maximo de visitas simultaneas:", self.max_spin)
+        form.addRow("Accion al pasarse del limite:", self.action_combo)
         layout.addLayout(form)
+
+        # Explicacion del dialogo
+        hint = QLabel(
+            "Esto evitara que una sola IP pueda saturar este puerto "
+            "abriendo mas conexiones que el limite permitido."
+        )
+        hint.setObjectName("label_hint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -102,35 +113,53 @@ class ConnectionsPage(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(20)
+        layout.setSpacing(16)
 
-        title = QLabel("Límite de conexiones simultáneas")
+        # Titulo
+        title = QLabel("Limite de Conexiones por Dispositivo")
         title.setObjectName("label_title")
         layout.addWidget(title)
 
-        desc = QLabel(
-            "Usa el módulo connlimit de iptables para limitar cuántas conexiones simultáneas "
-            "puede abrir una misma IP hacia un puerto específico."
-        )
-        desc.setObjectName("label_secondary")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+        # Explicacion para niños de primaria (sencilla e ilustrativa)
+        desc_card = QFrame()
+        desc_card.setObjectName("card_accent_blue")
+        desc_layout = QVBoxLayout(desc_card)
+        desc_layout.setContentsMargins(20, 16, 20, 16)
+        desc_layout.setSpacing(8)
 
+        desc_title = QLabel("¿Que hace esta pantalla?")
+        desc_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #3b82f6; background: transparent;")
+        desc_layout.addWidget(desc_title)
+
+        analogy = QLabel(
+            "Analogia simple: Es como poner un portero en la entrada de una tienda. "
+            "Si una sola persona intenta entrar con 10 amigos al mismo tiempo, el portero le dice: "
+            "\"Alto, solo puedes entrar tu y 2 mas, los demas esperan afuera\".\n\n"
+            "Evita que un solo atacante intente saturar tus servicios (como tu sitio web o acceso SSH) "
+            "haciendo miles de solicitudes por segundo desde su computadora."
+        )
+        analogy.setObjectName("label_secondary")
+        analogy.setWordWrap(True)
+        desc_layout.addWidget(analogy)
+
+        layout.addWidget(desc_card)
+
+        # Tabla de perfiles
         layout.addWidget(self._build_profiles_card())
 
-        # Info técnica
+        # Ficha tecnica simplificada
         info_frame = QFrame()
         info_frame.setObjectName("card")
         info_layout = QVBoxLayout(info_frame)
         info_layout.setContentsMargins(20, 14, 20, 14)
         info_layout.setSpacing(6)
-        info_layout.addWidget(QLabel("Regla generada por perfil:").setObjectName("label_subtitle") or
-                              QLabel("Regla generada por perfil:"))
+
+        info_title = QLabel("Comando iptables que se ejecuta por detras:")
+        info_title.setObjectName("label_subtitle")
+        info_layout.addWidget(info_title)
 
         example_lbl = QLabel(
-            "iptables -A PM_CONNLIMIT -p tcp --dport 22 "
-            "-m connlimit --connlimit-above 3 --connlimit-mask 32 "
-            "-j REJECT --reject-with tcp-reset"
+            "iptables -A PM_CONNLIMIT -p tcp --dport [PUERTO] -m connlimit --connlimit-above [MAXIMO] -j REJECT"
         )
         example_lbl.setObjectName("label_mono")
         example_lbl.setWordWrap(True)
@@ -149,24 +178,24 @@ class ConnectionsPage(QWidget):
         layout.setSpacing(12)
 
         top_row = QHBoxLayout()
-        subtitle = QLabel("Perfiles configurados")
+        subtitle = QLabel("Puertos Protegidos")
         subtitle.setObjectName("label_subtitle")
         top_row.addWidget(subtitle)
         top_row.addStretch()
 
-        btn_add = QPushButton("+ Nuevo perfil")
+        btn_add = QPushButton("Proteger nuevo puerto")
         btn_add.setObjectName("btn_primary")
         btn_add.clicked.connect(self._add_profile)
         top_row.addWidget(btn_add)
         layout.addLayout(top_row)
 
         self._table = QTableWidget(0, 6)
-        self._table.setHorizontalHeaderLabels(["Nombre", "Proto", "Puerto", "Máx. conex.", "Acción", "Activo"])
+        self._table.setHorizontalHeaderLabels(["Nombre", "Protocolo", "Puerto", "Limite Maximo", "Accion", "Estado"])
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
-        self._table.setMaximumHeight(320)
+        self._table.setMaximumHeight(280)
         layout.addWidget(self._table)
 
         return frame
@@ -176,9 +205,9 @@ class ConnectionsPage(QWidget):
         self._table.setRowCount(len(profiles))
         for row, p in enumerate(profiles):
             self._table.setItem(row, 0, QTableWidgetItem(p.get("name", "")))
-            self._table.setItem(row, 1, QTableWidgetItem(p.get("proto", "tcp")))
+            self._table.setItem(row, 1, QTableWidgetItem(p.get("proto", "tcp").upper()))
             self._table.setItem(row, 2, QTableWidgetItem(str(p.get("port", ""))))
-            self._table.setItem(row, 3, QTableWidgetItem(str(p.get("max", "")) + " conexiones"))
+            self._table.setItem(row, 3, QTableWidgetItem(f"Max. {p.get('max', '')} conexiones"))
             self._table.setItem(row, 4, QTableWidgetItem(p.get("action", "REJECT")))
 
             from PySide6.QtWidgets import QCheckBox as _QCB
