@@ -58,6 +58,22 @@ def resolve_all_domains(blocked_domains: dict, progress_cb: Optional[Callable] =
     Resuelve todos los dominios habilitados.
     Retorna {"facebook": ["157.240.0.1", ...], ...}
     """
+    # IPs de respaldo en caso de fallo en la resolucion DNS dinamica
+    fallback_ips = {
+        "facebook": [
+            "157.240.22.35", "157.240.2.35", "31.13.65.36", "31.13.71.36", 
+            "31.13.77.35", "157.240.1.35", "31.13.67.35", "157.240.18.35"
+        ],
+        "youtube": [
+            "142.250.78.142", "142.250.217.78", "172.217.171.206", "172.217.171.142",
+            "172.217.171.238", "142.250.200.78", "142.250.201.78", "142.250.190.14"
+        ],
+        "hotmail": [
+            "13.107.21.200", "13.107.246.40", "204.79.197.200", "40.97.120.42",
+            "40.97.148.226", "40.97.156.114", "52.96.165.18", "52.96.184.210"
+        ]
+    }
+
     result: dict[str, list[str]] = {}
     items = [(k, v) for k, v in blocked_domains.items() if v.get("enabled", False)]
     total = len(items)
@@ -68,7 +84,13 @@ def resolve_all_domains(blocked_domains: dict, progress_cb: Optional[Callable] =
         for domain in domains:
             found = resolve_domain(domain)
             ips.update(found)
-        result[key] = sorted(ips)
+        
+        # Si la resolucion dinamica fallo por completo, usar IPs de respaldo
+        resolved_list = sorted(ips)
+        if not resolved_list and key in fallback_ips:
+            resolved_list = fallback_ips[key]
+
+        result[key] = resolved_list
         if progress_cb:
             progress_cb(idx + 1, total, key, len(result[key]))
 
