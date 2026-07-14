@@ -179,6 +179,32 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                     f"-m set --match-set {set_name} dst "
                     f"-j {IPTABLES_CHAIN_REJECT}"
                 )
+
+        # Si el bloqueo DNS agresivo esta activado, inyectamos las reglas de filtrado por contenido DNS
+        if config.get("aggressive_dns", False):
+            lines.append("")
+            lines.append("# --- Reglas de Bloqueo DNS Agresivo (Filtro de Contenido) ---")
+            
+            # Bloquear servidores DoH conocidos para forzar fallback a DNS estandar en puerto 53
+            doh_ips = ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9"]
+            for ip in doh_ips:
+                lines.append(f"-A {CHAIN_WEBBLOCK} -p tcp -d {ip} --dport 443 -j {IPTABLES_CHAIN_REJECT}")
+            
+            # Palabras clave a bloquear en consultas DNS (unencrypted UDP/TCP 53)
+            keywords = ["facebook", "youtube", "hotmail", "outlook"]
+            for kw in keywords:
+                # Bloquear en consultas UDP 53
+                lines.append(
+                    f"-A {CHAIN_WEBBLOCK} -p udp --dport 53 "
+                    f"-m string --string \"{kw}\" --algo bm "
+                    f"-j {IPTABLES_CHAIN_REJECT}"
+                )
+                # Bloquear en consultas TCP 53
+                lines.append(
+                    f"-A {CHAIN_WEBBLOCK} -p tcp --dport 53 "
+                    f"-m string --string \"{kw}\" --algo bm "
+                    f"-j {IPTABLES_CHAIN_REJECT}"
+                )
         lines.append("")
 
     # === Saltos desde FORWARD y OUTPUT hacia las cadenas personalizadas ===
