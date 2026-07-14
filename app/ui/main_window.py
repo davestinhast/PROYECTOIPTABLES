@@ -66,12 +66,12 @@ class MainWindow(QMainWindow):
 
         self._pages = {}
         page_classes = [
-            ("🌐  Sitios Web",         WebsitesPage),
-            ("🔀  Cliente / Servidor", CliSrvPage),
-            ("📵  Bloqueo MAC",        MacPage),
-            ("🔒  Conexiones",         ConnectionsPage),
-            ("📋  Registros",          LogsPage),
-            ("⚙️   Configuración",     SettingsPage),
+            ("Sitios Web",         WebsitesPage),
+            ("Cliente / Servidor", CliSrvPage),
+            ("Bloqueo MAC",        MacPage),
+            ("Conexiones",         ConnectionsPage),
+            ("Registros",          LogsPage),
+            ("Configuracion",      SettingsPage),
         ]
 
         for title, cls in page_classes:
@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         # Título
-        title_lbl = QLabel(f"⚡ {APP_NAME}")
+        title_lbl = QLabel(f"{APP_NAME}")
         title_lbl.setStyleSheet(
             "font-size: 16px; font-weight: 700; color: #3b82f6; background: transparent;"
         )
@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
 
         # Info de red
         own_ip, iface = network_service.get_own_ip_and_interface()
-        mode_text = "🔴 Administración" if self._mode == "admin" else "🟡 Demo"
+        mode_text = "Administracion" if self._mode == "admin" else "Demo"
         info_lbl = QLabel(
             f"{mode_text}   |   IP: {own_ip}   |   Interfaz: {iface}"
         )
@@ -159,7 +159,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(btn_reset)
 
         # Botón Aplicar reglas (el más importante)
-        self._btn_apply = QPushButton("▶  Aplicar reglas")
+        self._btn_apply = QPushButton("Aplicar reglas")
         self._btn_apply.setObjectName("btn_apply")
         self._btn_apply.setToolTip(
             "Resuelve los dominios, carga ipset y aplica las reglas iptables.\n"
@@ -179,9 +179,9 @@ class MainWindow(QMainWindow):
         for page in self._pages.values():
             if hasattr(page, "update_config"):
                 page.update_config(new_config)
-        self._status_label.setText("✓ Configuración guardada.")
+        self._status_label.setText("Configuracion guardada.")
         self._pending_changes = True
-        self._btn_apply.setText("▶  Aplicar cambios *")
+        self._btn_apply.setText("Aplicar cambios *")
         # Actualizar ruta en header
         rules_path = new_config.get("rules_file", "") or LINUX_RULES_FILE
         self._rules_path_lbl.setText(f"Reglas: {rules_path}")
@@ -239,8 +239,8 @@ class MainWindow(QMainWindow):
         self._status_label.setText(msg)
         if ok:
             self._pending_changes = False
-            self._btn_apply.setText("▶  Aplicar reglas")
-            QMessageBox.information(self, "✓ Reglas aplicadas", msg)
+            self._btn_apply.setText("Aplicar reglas")
+            QMessageBox.information(self, "Reglas aplicadas", msg)
         else:
             QMessageBox.warning(self, "Error al aplicar", msg)
 

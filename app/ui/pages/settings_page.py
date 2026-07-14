@@ -230,7 +230,7 @@ class SettingsPage(QWidget):
         self._save_error_lbl.setText("")
         # Feedback visual
         self._save_error_lbl.setStyleSheet("color: #22c55e; font-size: 12px; background: transparent;")
-        self._save_error_lbl.setText("✓ Configuración guardada correctamente.")
+        self._save_error_lbl.setText("Configuracion guardada correctamente.")
 
     def _auto_detect(self):
         ip, iface = network_service.get_own_ip_and_interface()
@@ -248,7 +248,7 @@ class SettingsPage(QWidget):
         # IP Forward
         if is_linux():
             ip_fwd = has_ip_forward()
-            icon = "✓" if ip_fwd else "✗"
+            icon = "[OK]" if ip_fwd else "[!]"
             color = "#22c55e" if ip_fwd else "#ef4444"
             lines.append(f'<span style="color:{color}">{icon} IP Forward: {"activo" if ip_fwd else "INACTIVO"}</span>')
         else:
@@ -265,7 +265,7 @@ class SettingsPage(QWidget):
                 masq = "MASQUERADE" in r.stdout
             except Exception:
                 masq = False
-        icon = "✓" if masq else "✗"
+        icon = "[OK]" if masq else "[!]"
         color = "#22c55e" if masq else "#f59e0b"
         msg = "configurado" if masq else "falta (aplica las reglas primero)"
         lines.append(f'<span style="color:{color}">{icon} NAT MASQUERADE: {msg}</span>')

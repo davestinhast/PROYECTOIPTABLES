@@ -104,7 +104,7 @@ class LogsPage(QWidget):
                 "Una vez que apliques las reglas y haya intentos de conexión bloqueados,\n"
                 "los registros aparecerán aquí automáticamente."
             )
-            self._exists_lbl.setText("● Sin archivo")
+            self._exists_lbl.setText("Sin archivo")
             self._exists_lbl.setStyleSheet("color: #f59e0b; font-size: 11px; background: transparent;")
             self._hint_lbl.setVisible(True)
             return
@@ -121,7 +121,7 @@ class LogsPage(QWidget):
                 scrollbar.setValue(scrollbar.maximum())
 
             count = sum(1 for l in lines if "PM-DROP" in l)
-            self._exists_lbl.setText(f"● {count} paquetes rechazados")
+            self._exists_lbl.setText(f"{count} paquetes rechazados")
             self._exists_lbl.setStyleSheet("color: #ef4444; font-size: 11px; background: transparent;")
         except Exception as e:
             self._text_area.setPlainText(f"Error al leer el archivo:\n{e}")

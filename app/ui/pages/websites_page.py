@@ -138,11 +138,11 @@ class _StatusBar(QFrame):
         from app.core.platform_detector import is_linux, has_ip_forward
         if is_linux():
             if has_ip_forward():
-                self._ipfwd_lbl.setText("✓  IP Forward activo")
+                self._ipfwd_lbl.setText("[OK]  IP Forward activo")
                 self._ipfwd_lbl.setStyleSheet("color: #22c55e; font-size: 12px; background: transparent;")
                 self._btn_enable_ipfwd.setVisible(False)
             else:
-                self._ipfwd_lbl.setText("✗  IP Forward INACTIVO — el bloqueo no funcionará en clientes")
+                self._ipfwd_lbl.setText("[!]  IP Forward INACTIVO — el bloqueo no funcionara en clientes")
                 self._ipfwd_lbl.setStyleSheet("color: #ef4444; font-size: 12px; font-weight: 600; background: transparent;")
                 self._btn_enable_ipfwd.setVisible(True)
         else:
@@ -222,7 +222,7 @@ class SiteCard(QFrame):
         status_row = QHBoxLayout()
         status_row.setSpacing(20)
 
-        self._badge = QLabel("○  Sin verificar")
+        self._badge = QLabel("Sin verificar")
         self._badge.setStyleSheet(
             "color: #4a5060; font-size: 12px; font-weight: 600; background: transparent;"
         )
@@ -252,7 +252,7 @@ class SiteCard(QFrame):
     def set_checking(self, checking: bool):
         self._btn_check.setEnabled(not checking)
         if checking:
-            self._badge.setText("⏳  Verificando...")
+            self._badge.setText("Verificando...")
             self._badge.setStyleSheet(
                 "color: #f59e0b; font-size: 12px; font-weight: 600; background: transparent;"
             )
@@ -268,7 +268,7 @@ class SiteCard(QFrame):
 
         if ip_count == -1:
             # ipset no disponible (modo demo o sin root)
-            self._badge.setText("○  No disponible (modo demo)")
+            self._badge.setText("No disponible (modo demo)")
             self._badge.setStyleSheet(
                 "color: #4a5060; font-size: 12px; font-weight: 600; background: transparent;"
             )
@@ -277,7 +277,7 @@ class SiteCard(QFrame):
             self._reach_label.setText("")
         elif ip_count == 0:
             # Set vacío o no existe → bloqueo inactivo
-            self._badge.setText("🟡  INACTIVO — aplica las reglas primero")
+            self._badge.setText("INACTIVO — aplica las reglas primero")
             self._badge.setStyleSheet(
                 "color: #f59e0b; font-size: 12px; font-weight: 600; background: transparent;"
             )
@@ -292,19 +292,19 @@ class SiteCard(QFrame):
             # Set con IPs → bloqueo activo
             if reachable:
                 # Hay IPs en el set pero el sitio responde → puede ser que Kali no sea el gateway
-                self._badge.setText("🟠  PARCIAL — set cargado pero sitio alcanzable desde Kali")
+                self._badge.setText("PARCIAL — set cargado pero sitio alcanzable desde Kali")
                 self._badge.setStyleSheet(
                     "color: #f97316; font-size: 12px; font-weight: 600; background: transparent;"
                 )
                 self._reach_label.setStyleSheet("color: #f97316; font-size: 11px; background: transparent;")
                 self._reach_label.setText("Kali también es cliente — normal si OUTPUT no bloquea a Kali")
             else:
-                self._badge.setText("🔴  BLOQUEADO")
+                self._badge.setText("[BLOQUEADO]")
                 self._badge.setStyleSheet(
                     "color: #ef4444; font-size: 12px; font-weight: 600; background: transparent;"
                 )
                 self._reach_label.setStyleSheet("color: #22c55e; font-size: 11px; background: transparent;")
-                self._reach_label.setText("TCP 443: bloqueado ✓")
+                self._reach_label.setText("TCP 443: bloqueado")
 
             self._ipset_label.setText(f"ipset: {ip_count} IPs bloqueadas ({ts})")
             self._ipset_label.setStyleSheet("color: #22c55e; font-size: 11px; background: transparent;")
@@ -355,7 +355,7 @@ class WebsitesPage(QWidget):
         title_row.addWidget(title)
         title_row.addStretch()
 
-        btn_refresh_ips = QPushButton("↻  Actualizar IPs bloqueadas")
+        btn_refresh_ips = QPushButton("Actualizar IPs bloqueadas")
         btn_refresh_ips.setObjectName("btn_secondary")
         btn_refresh_ips.setToolTip(
             "Resuelve los dominios de nuevo y actualiza los sets de ipset.\n"
@@ -483,12 +483,12 @@ class WebsitesPage(QWidget):
 
     def _on_refresh_done(self, ok: bool, msg: str):
         self._btn_refresh_ips.setEnabled(True)
-        self._btn_refresh_ips.setText("↻  Actualizar IPs bloqueadas")
+        self._btn_refresh_ips.setText("Actualizar IPs bloqueadas")
         if ok:
-            self._refresh_status.setText(f"✓  {msg}")
+            self._refresh_status.setText(f"[OK]  {msg}")
             self._refresh_status.setStyleSheet("color: #22c55e; background: transparent;")
         else:
-            self._refresh_status.setText(f"✗  {msg}")
+            self._refresh_status.setText(f"[!]  {msg}")
             self._refresh_status.setStyleSheet("color: #ef4444; background: transparent;")
         self._verify_all()
 

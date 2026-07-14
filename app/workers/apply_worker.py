@@ -1,5 +1,5 @@
 """
-Workers para operaciones de firewall en hilos separados (no bloquean la GUI).
+Workers para operaciones de firewall en hilos separados.
 """
 
 from PySide6.QtCore import QThread, Signal
@@ -9,8 +9,8 @@ from app.constants import LINUX_RULES_FILE
 
 
 class ApplyWorker(QThread):
-    progress = Signal(int, str)       # porcentaje, mensaje
-    finished = Signal(bool, str)      # ok, mensaje final
+    progress = Signal(int, str)
+    finished = Signal(bool, str)
     rule_count = Signal(int)
 
     def __init__(self, config: dict):
@@ -19,31 +19,24 @@ class ApplyWorker(QThread):
 
     def run(self):
         try:
-            # Paso 1: Resolver dominios habilitados
+            # Paso 1: Resolver dominios
             self.progress.emit(10, "Resolviendo dominios de Facebook, YouTube y Hotmail...")
             resolved = domain_service.resolve_all_domains(
                 self._config.get("blocked_domains", {}),
                 progress_cb=lambda cur, tot, key, n: self.progress.emit(
                     10 + int(40 * cur / max(tot, 1)),
-                    f"Resolviendo {key}... {n} IPs encontradas"
+                    f"Resolviendo {key}... {n} IPs"
                 )
             )
 
-            # Paso 2: Generar archivo de reglas
+            # Paso 2: Generar reglas
             self.progress.emit(55, "Generando reglas iptables...")
             rules_content = rules_builder.build_rules(self._config, resolved)
             count = rules_builder.get_rule_count(rules_content)
             self.rule_count.emit(count)
 
-            # Paso 3: Validar con iptables-restore --test
-            self.progress.emit(70, "Validando reglas con iptables-restore --test...")
-            ok, msg = firewall_service.validate_rules(rules_content)
-            if not ok:
-                self.finished.emit(False, f"Validación fallida: {msg}")
-                return
-
-            # Paso 4: Aplicar (ipset + iptables + escribir archivo personalizado)
-            self.progress.emit(85, "Aplicando ipset y reglas iptables...")
+            # Paso 3: Aplicar (crea sets vacios, carga IPs, valida, escribe, aplica)
+            self.progress.emit(70, "Aplicando ipset y validando reglas...")
             rules_path = self._config.get("rules_file", "") or LINUX_RULES_FILE
             ok, msg = firewall_service.apply_rules(
                 rules_content,
@@ -69,15 +62,16 @@ class ValidateWorker(QThread):
             resolved = domain_service.resolve_all_domains(
                 self._config.get("blocked_domains", {}),
             )
+            blocked_keys = list(resolved.keys())
             rules_content = rules_builder.build_rules(self._config, resolved)
-            ok, msg = firewall_service.validate_rules(rules_content)
+            ok, msg = firewall_service.validate_rules(rules_content, blocked_keys=blocked_keys)
             self.finished.emit(ok, msg)
         except Exception as e:
             self.finished.emit(False, str(e))
 
 
 class RefreshIpsetWorker(QThread):
-    """Actualiza los sets de ipset (IPs de Facebook/YouTube/Hotmail) sin recargar iptables."""
+    """Actualiza los sets de ipset sin recargar iptables."""
     progress = Signal(str)
     finished = Signal(bool, str)
 
@@ -87,11 +81,11 @@ class RefreshIpsetWorker(QThread):
 
     def run(self):
         try:
-            self.progress.emit("Resolviendo IPs actuales de dominios bloqueados...")
+            self.progress.emit("Resolviendo IPs actuales...")
             ok, msg = firewall_service.refresh_ipset(self._config)
             self.finished.emit(ok, msg)
         except Exception as e:
-            self.finished.emit(False, f"Error al actualizar IPs: {e}")
+            self.finished.emit(False, f"Error: {e}")
 
 
 class ScanNetworkWorker(QThread):
