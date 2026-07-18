@@ -86,6 +86,13 @@ def main():
     config = _apply_defaults(config)
     config = _auto_detect_network(config)   # ← auto-detecta red al arrancar
 
+    # Iniciar servidor DNS Proxy en segundo plano
+    try:
+        from app.services.dns_proxy_service import get_dns_proxy
+        get_dns_proxy().start(config)
+    except Exception:
+        pass
+
     from app.ui.main_window import MainWindow
     window = MainWindow(config)
     window.show()

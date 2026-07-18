@@ -180,6 +180,14 @@ class MainWindow(QMainWindow):
         for page in self._pages.values():
             if hasattr(page, "update_config"):
                 page.update_config(new_config)
+        
+        # Actualizar la configuración del proxy DNS en tiempo real
+        try:
+            from app.services.dns_proxy_service import get_dns_proxy
+            get_dns_proxy().update_config(new_config)
+        except Exception:
+            pass
+
         self._status_label.setText("Configuracion guardada.")
         self._pending_changes = True
         self._btn_apply.setText("Guardar y Activar *")

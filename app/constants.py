@@ -41,6 +41,9 @@ CHAIN_CLISRV = "PM_CLISRV"
 # Prefijo de los ipset sets (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL)
 IPSET_SET_PREFIX = "PM_"
 
+# Puerto para el DNS proxy server en user-space
+DNS_PROXY_PORT = 10053
+
 # Colores UI (sincronizados con main.qss)
 COLOR_BG = "#0a0a0f"
 COLOR_SIDEBAR = "#111118"

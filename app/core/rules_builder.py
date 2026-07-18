@@ -46,7 +46,11 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
         "",
     ]
 
-    # ── Tabla NAT: MASQUERADE para que Kali actúe como gateway/router ──────────
+    # === Verificar si hay bloqueos de sitios activos ===
+    blocked_domains = config.get("blocked_domains", {})
+    has_webblock = any(v.get("enabled", False) for v in blocked_domains.values())
+
+    # ── Tabla NAT: MASQUERADE y Redirección DNS ──────────────────────────────
     lines += [
         "*nat",
         ":PREROUTING ACCEPT [0:0]",
@@ -54,6 +58,16 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
         ":OUTPUT ACCEPT [0:0]",
         ":POSTROUTING ACCEPT [0:0]",
     ]
+    
+    server_ip = config.get("server_ip", "")
+    if has_webblock and server_ip:
+        # Redirigir tráfico DNS (UDP/TCP 53) de clientes al proxy local en el puerto 10053
+        lines.append(f"-A PREROUTING -p udp --dport 53 -j DNAT --to-destination {server_ip}:10053")
+        lines.append(f"-A PREROUTING -p tcp --dport 53 -j DNAT --to-destination {server_ip}:10053")
+        # Redirigir tráfico DNS de la propia máquina de Kali (excepto usuario root/la app)
+        lines.append(f"-A OUTPUT -p udp --dport 53 -m owner ! --uid-owner 0 -j DNAT --to-destination 127.0.0.1:10053")
+        lines.append(f"-A OUTPUT -p tcp --dport 53 -m owner ! --uid-owner 0 -j DNAT --to-destination 127.0.0.1:10053")
+
     if wan:
         lines.append(f"-A POSTROUTING -o {wan} -j MASQUERADE")
     else:
@@ -210,6 +224,11 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
             for ip in doh_ips:
                 lines.append(f"-A {CHAIN_WEBBLOCK} -p tcp -d {ip} --dport 443 -j {IPTABLES_CHAIN_REJECT}")
             
+            # Bloquear DNS-over-TLS (DoT) en el puerto 853 (TCP/UDP) para forzar fallback a DNS normal
+            lines.append("# Bloqueo global de DoT (puerto 853) para forzar fallback a DNS normal")
+            lines.append(f"-A {CHAIN_WEBBLOCK} -p tcp --dport 853 -j {IPTABLES_CHAIN_REJECT}")
+            lines.append(f"-A {CHAIN_WEBBLOCK} -p udp --dport 853 -j {IPTABLES_CHAIN_REJECT}")
+
             # BLOQUEO DE QUIC (UDP 443): Obliga al navegador a usar TCP 443 (donde las reglas de IP actúan sí o sí)
             # Esto evita que YouTube se salte las reglas usando protocolos UDP rápidos de Google
             lines.append("# Bloqueo global de QUIC para forzar fallback a TCP")
@@ -249,6 +268,9 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
 
     lines += [
         "# [Saltos INPUT a cadenas personalizadas]",
+        # Aceptar tráfico hacia el DNS Proxy local en el puerto 10053
+        f"-A INPUT -p udp --dport 10053 -j ACCEPT",
+        f"-A INPUT -p tcp --dport 10053 -j ACCEPT",
         f"-A INPUT -j {CHAIN_WEBBLOCK}",
     ]
 
