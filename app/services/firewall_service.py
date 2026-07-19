@@ -232,20 +232,17 @@ def deep_reset_network() -> tuple[bool, str]:
             log_msgs.append(f"Error al limpiar /etc/hosts: {e}")
 
     # 4. Restaurar /etc/resolv.conf
-    resolv_path = Path("/etc/resolv.conf")
     try:
-        # Agregar DNS de Google y Cloudflare
-        dns_lines = [
-            "# Generado por M-FIREWALL Deep Reset",
-            "nameserver 8.8.8.8",
-            "nameserver 1.1.1.1",
-            "nameserver 8.8.4.4"
-        ]
-        # Escribir o anexar
-        resolv_path.write_text("\n".join(dns_lines) + "\n", encoding="utf-8")
-        log_msgs.append("DNS restablecido en /etc/resolv.conf (nameservers 8.8.8.8 y 1.1.1.1 agregados).")
+        # En Linux, NetworkManager gestiona /etc/resolv.conf a través de DHCP.
+        # En lugar de forzar 8.8.8.8 (que algunos ISPs como Claro bloquean),
+        # borramos el archivo manual y reiniciamos NetworkManager para que el ISP asigne el correcto.
+        import os
+        if os.path.exists("/etc/resolv.conf"):
+            os.remove("/etc/resolv.conf")
+        subprocess.run(["systemctl", "restart", "NetworkManager"], timeout=10)
+        log_msgs.append("DNS restablecido: NetworkManager reiniciado para obtener los DNS del ISP original por DHCP.")
     except Exception as e:
-        log_msgs.append(f"Error al escribir en /etc/resolv.conf: {e}")
+        log_msgs.append(f"Error al reiniciar NetworkManager para restaurar DNS: {e}")
 
     return True, "\n".join(log_msgs)
 
