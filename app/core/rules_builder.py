@@ -2,13 +2,11 @@
 Genera el archivo iptables-restore desde la configuración JSON.
 Produce un archivo .v4 listo para: iptables-restore < project_m.rules.v4
 
-ESTRATEGIA DE BLOQUEO DE SITIOS WEB:
-  - Se usan ipset sets (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL) en lugar de IPs
-    hardcodeadas, ya que los CDN de estos sitios cambian constantemente.
-  - El bloqueo aplica tanto en FORWARD (tráfico de clientes) como en OUTPUT
-    (tráfico de la propia máquina Kali).
-  - NO se usa string match (-m string) porque HTTPS cifra el contenido y
-    la cadena "facebook.com" no aparece en texto plano.
+Estrategia de bloqueo de sitios web:
+  - Se usan ipset sets (PM_FACEBOOK, PM_YOUTUBE, PM_HOTMAIL) para IPs iniciales.
+  - Se usa DNS Proxy local para retornar NXDOMAIN y bloquear resolución.
+  - Se usa inspección de paquetes (SNI - Server Name Indication) en el puerto TCP 443
+    para bloquear el inicio de la conexión HTTPS sin importar qué IP use el CDN.
 """
 
 from datetime import datetime
@@ -192,6 +190,24 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                 lines.append(
                     f"-A {CHAIN_WEBBLOCK} -p udp --dport {port} "
                     f"-m set --match-set {set_name} dst "
+                    f"-j {IPTABLES_CHAIN_REJECT}"
+                )
+
+            # BLOQUEO SNI (Server Name Indication) PARA HTTPS (TLS 1.2/1.3)
+            # Esto bloquea la conexión incluso si el cliente tiene la IP cacheadada o usa DoH, 
+            # ya que lee el dominio en texto plano durante el 'Client Hello' del protocolo TLS.
+            sni_keywords = []
+            if key == "facebook":
+                sni_keywords = ["facebook.com", "fbcdn.net"]
+            elif key == "youtube":
+                sni_keywords = ["youtube.com", "googlevideo.com", "ytimg.com"]
+            elif key == "hotmail":
+                sni_keywords = ["hotmail.com", "outlook.com", "live.com"]
+            
+            for kw in sni_keywords:
+                lines.append(
+                    f"-A {CHAIN_WEBBLOCK} -p tcp --dport 443 "
+                    f"-m string --string \"{kw}\" --algo bm --to 1500 "
                     f"-j {IPTABLES_CHAIN_REJECT}"
                 )
 
