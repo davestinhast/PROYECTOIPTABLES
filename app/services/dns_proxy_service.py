@@ -111,6 +111,23 @@ class DNSProxyServer:
         except Exception:
             return "desconocido"
 
+    def _get_question_end_offset(self, data: bytes, offset: int = 12) -> int:
+        """Calcula el final de la seccion de pregunta DNS para poder truncar metadatos EDNS0."""
+        try:
+            while offset < len(data):
+                length = data[offset]
+                if length == 0:
+                    offset += 1
+                    break
+                if (length & 0xc0) == 0xc0:
+                    offset += 2
+                    break
+                offset += length + 1
+            # Agregar 4 bytes para incluir QTYPE (2 bytes) y QCLASS (2 bytes)
+            return offset + 4
+        except Exception:
+            return len(data)
+
     def _write_to_rejected_log(self, client_ip: str, domain: str, action: str):
         """Escribe una línea de log personalizada en el archivo oficial de logs."""
         from datetime import datetime
@@ -170,8 +187,10 @@ class DNSProxyServer:
             # Additional Count: 0 (0x0000)
             tx_id = data[:2]
             qd_count = data[4:6]
-            # Cabecera DNS NXDOMAIN + la pregunta original (data[12:])
-            response = tx_id + b"\x81\x83" + qd_count + b"\x00\x00\x00\x00\x00\x00" + data[12:]
+            question_end = self._get_question_end_offset(data)
+            # Cabecera DNS NXDOMAIN + la pregunta original (truncada para NO incluir EDNS0 original)
+            # Esto evita generar un paquete DNS malformado que Chrome ignoraria.
+            response = tx_id + b"\x81\x83" + qd_count + b"\x00\x00\x00\x00\x00\x00" + data[12:question_end]
             try:
                 self.sock.sendto(response, addr)
                 logger.info(f"DNS Proxy: Interceptado y bloqueado {domain} para {client_ip}")
