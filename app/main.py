@@ -38,11 +38,12 @@ def _apply_defaults(config: dict) -> dict:
         current.setdefault("label", defaults.get("label", key))
         current.setdefault("description", defaults.get("description", ""))
         current.setdefault("enabled", defaults.get("enabled", False))
-        known_domains = current.setdefault("domains", [])
-        for domain in defaults.get("domains", []):
-            if domain not in known_domains:
-                known_domains.append(domain)
-                changed = True
+        # Reemplazar lista de dominios con la canónica de constants.py
+        # (elimina dominios obsoletos que bloquean servicios no deseados)
+        canonical = list(defaults.get("domains", []))
+        if current.get("domains") != canonical:
+            current["domains"] = canonical
+            changed = True
 
     if changed:
         save_config(config)

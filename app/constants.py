@@ -105,7 +105,6 @@ BLOCKED_DOMAINS = {
             "yt3.ggpht.com",
             "youtube-nocookie.com",
             "www.youtube-nocookie.com",
-            "googleusercontent.com",
             "youtube.l.google.com",
             "youtube-ui.l.google.com",
             "ytimg.l.google.com",
@@ -114,7 +113,6 @@ BLOCKED_DOMAINS = {
             "www.ggpht.com",
             "youtubei.googleapis.com",
             "youtube.googleapis.com",
-            "play.google.com",
         ],
         "enabled": False,
     },
@@ -145,8 +143,8 @@ BLOCKED_DOMAINS = {
 # Perfiles connlimit por defecto
 DEFAULT_CONN_PROFILES = [
     {"name": "SSH",          "proto": "tcp", "port": 22,  "max": 3,  "action": "REJECT", "enabled": False},
-    {"name": "HTTP",         "proto": "tcp", "port": 80,  "max": 10, "action": "REJECT", "enabled": False},
-    {"name": "HTTPS",        "proto": "tcp", "port": 443, "max": 10, "action": "REJECT", "enabled": False},
+    {"name": "HTTP",         "proto": "tcp", "port": 80,  "max": 50, "action": "REJECT", "enabled": False},
+    {"name": "HTTPS",        "proto": "tcp", "port": 443, "max": 50, "action": "REJECT", "enabled": False},
     {"name": "Personalizado","proto": "tcp", "port": 0,   "max": 5,  "action": "REJECT", "enabled": False},
 ]
 
