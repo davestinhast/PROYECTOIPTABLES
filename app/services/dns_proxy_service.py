@@ -11,7 +11,23 @@ from pathlib import Path
 from app.constants import DNS_PROXY_PORT
 
 logger = logging.getLogger("dns_proxy")
-logging.basicConfig(level=logging.INFO)
+logger.setLevel(logging.INFO)
+logger.propagate = False  # No mandar logs al root handler (stdout)
+
+def _setup_file_logging():
+    """Redirige logs del DNS proxy a archivo, nunca a consola."""
+    if logger.handlers:
+        return
+    try:
+        log_dir = Path("/var/log/proyecto-m")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(str(log_dir / "dns-proxy.log"), encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+    except Exception:
+        # Si no se puede escribir el archivo (ej. Windows / sin permisos),
+        # agregar NullHandler para silenciar completamente
+        logger.addHandler(logging.NullHandler())
 
 _server_instance = None
 _server_lock = threading.Lock()
@@ -60,11 +76,12 @@ class DNSProxyServer:
         self.config = {}
 
     def start(self, config: dict):
+        _setup_file_logging()
         with _server_lock:
             self.config = config
             if self.running:
                 return
-            
+
             # Detectar el DNS activo de la red del usuario
             self.upstream = detect_upstream_dns()
             

@@ -9,6 +9,7 @@ Estrategia de bloqueo de sitios web:
     para bloquear el inicio de la conexión HTTPS sin importar qué IP use el CDN.
 """
 
+import subprocess
 from datetime import datetime
 from app.constants import (
     IPTABLES_CHAIN_REJECT, IPTABLES_LOG_PREFIX, IPTABLES_LOG_LIMIT,
@@ -16,6 +17,26 @@ from app.constants import (
     CHAIN_CONNLIMIT, CHAIN_CLISRV, APP_NAME, APP_VERSION,
     WEB_BLOCK_PORTS, IPSET_SET_PREFIX,
 )
+
+
+def _has_xt_string() -> bool:
+    """Verifica que el módulo xt_string esté disponible antes de agregar reglas SNI.
+    Si no está disponible y lo incluimos, iptables-restore falla y NO aplica NINGUNA regla."""
+    try:
+        r = subprocess.run(
+            ["modprobe", "xt_string"],
+            capture_output=True, timeout=5
+        )
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+    # Fallback: buscar el .ko directamente
+    try:
+        import glob
+        return bool(glob.glob("/lib/modules/*/kernel/net/netfilter/xt_string.ko*"))
+    except Exception:
+        return False
 
 
 SNI_KEYWORDS = {
@@ -121,12 +142,14 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
         "",
     ]
 
-    # === Cadena PM_REJECT: LOG + DROP ===
+    # === Cadena PM_REJECT: LOG + REJECT inmediato (no DROP — REJECT muestra error en browser al instante) ===
     lines += [
-        f"# [Cadena {IPTABLES_CHAIN_REJECT}: registra y rechaza]",
+        f"# [Cadena {IPTABLES_CHAIN_REJECT}: registra y rechaza con reset inmediato]",
         f"-A {IPTABLES_CHAIN_REJECT} -m limit --limit {IPTABLES_LOG_LIMIT} --limit-burst 10 "
         f"-j LOG --log-prefix \"{IPTABLES_LOG_PREFIX}\" --log-level {IPTABLES_LOG_LEVEL}",
-        f"-A {IPTABLES_CHAIN_REJECT} -j {config.get('default_action', 'DROP')}",
+        f"-A {IPTABLES_CHAIN_REJECT} -p tcp -j REJECT --reject-with tcp-reset",
+        f"-A {IPTABLES_CHAIN_REJECT} -p udp -j REJECT --reject-with icmp-port-unreachable",
+        f"-A {IPTABLES_CHAIN_REJECT} -j DROP",
         "",
     ]
 
@@ -229,16 +252,20 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                 )
 
             # BLOQUEO SNI (Server Name Indication) PARA HTTPS (TLS 1.2/1.3)
-            # Esto bloquea la conexión incluso si el cliente tiene la IP cacheadada o usa DoH, 
-            # ya que lee el dominio en texto plano durante el 'Client Hello' del protocolo TLS.
+            # Lee el dominio en texto plano durante el 'Client Hello' TLS.
+            # IMPORTANTE: Solo se agrega si xt_string está disponible.
+            # Si no está y se agrega de todas formas, iptables-restore falla COMPLETO.
             sni_keywords = SNI_KEYWORDS.get(key, [])
-            
-            for kw in sni_keywords:
-                lines.append(
-                    f"-A {CHAIN_WEBBLOCK} -p tcp --dport 443 "
-                    f"-m string --string \"{kw}\" --algo bm --to 65535 "
-                    f"-j {IPTABLES_CHAIN_REJECT}"
-                )
+            if sni_keywords and _has_xt_string():
+                lines.append(f"# SNI inspect (xt_string disponible)")
+                for kw in sni_keywords:
+                    lines.append(
+                        f"-A {CHAIN_WEBBLOCK} -p tcp --dport 443 "
+                        f"-m string --string \"{kw}\" --algo bm --to 65535 "
+                        f"-j {IPTABLES_CHAIN_REJECT}"
+                    )
+            else:
+                lines.append(f"# SNI inspect omitido (xt_string no disponible o sin keywords)")
 
         # El bloqueo DNS inteligente se activa de forma AUTOMÁTICA para cualquier dominio que esté habilitado.
         # Así el usuario no tiene que activar casillas avanzadas complejas.
@@ -252,20 +279,13 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                 if domain_cfg.get("enabled", False):
                     keywords += DNS_KEYWORDS.get(key, [])
 
-        if keywords:
+        if keywords and _has_xt_string():
             lines.append("")
             lines.append("# [Bloqueo DNS por palabra clave — solo tráfico DNS (puerto 53)]")
-            # NOTA: No se bloquean DoH IPs ni QUIC global aquí porque esas reglas
-            # afectarían el tráfico de salida del propio servidor (OUTPUT) cortando
-            # la conectividad general. El DNS Proxy en puerto 10053 intercepta
-            # las consultas DNS y devuelve NXDOMAIN para los dominios bloqueados.
-
             # Eliminar duplicados
             keywords = list(set(keywords))
             for kw in keywords:
-                # Bloquear consultas (dport 53) y respuestas (sport 53) en UDP en la cadena PM_DNSBLOCK
-                # Duplicamos con algoritmo BM y KMP por compatibilidad según el kernel de Linux
-                for algo in ["bm", "kmp"]:
+                for algo in ["bm"]:  # Solo bm — kmp es redundante y duplica reglas sin beneficio
                     lines.append(
                         f"-A PM_DNSBLOCK -p udp --dport 53 "
                         f"-m string --string \"{kw}\" --algo {algo} "
@@ -276,7 +296,6 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                         f"-m string --string \"{kw}\" --algo {algo} "
                         f"-j {IPTABLES_CHAIN_REJECT}"
                     )
-                    # Bloquear en TCP
                     lines.append(
                         f"-A PM_DNSBLOCK -p tcp --dport 53 "
                         f"-m string --string \"{kw}\" --algo {algo} "
@@ -287,6 +306,11 @@ def build_rules(config: dict, resolved_ips: dict[str, list[str]]) -> str:
                         f"-m string --string \"{kw}\" --algo {algo} "
                         f"-j {IPTABLES_CHAIN_REJECT}"
                     )
+        elif keywords:
+            # xt_string no disponible — las reglas DNS string se omiten
+            # El DNS Proxy (puerto 10053) sigue manejando el bloqueo DNS
+            lines.append("# PM_DNSBLOCK string rules omitidas (xt_string no disponible)")
+            keywords = []  # vaciar para que no se agreguen los saltos a PM_DNSBLOCK
         lines.append("")
 
     # === Saltos desde INPUT, FORWARD y OUTPUT hacia las cadenas personalizadas ===

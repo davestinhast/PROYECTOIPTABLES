@@ -158,6 +158,12 @@ class ApplyWorker(QThread):
             )
             
             if ok:
+                # Inyectar /etc/hosts como capa adicional de bloqueo local
+                hosts_ok, hosts_msg = firewall_service.apply_hosts_block(self._config)
+                if hosts_ok:
+                    self.log_line.emit(f"\n[SISTEMA] /etc/hosts: {hosts_msg}")
+                else:
+                    self.log_line.emit(f"\n[AVISO] /etc/hosts: {hosts_msg}")
                 self.log_line.emit("\n[!] FIREWALL CONFIGURADO Y ACTIVO CORRECTAMENTE.")
                 self.log_line.emit("[!] Todos los bloqueos han sido aplicados con éxito en el kernel.")
             else:

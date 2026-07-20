@@ -241,6 +241,30 @@ class MainWindow(QMainWindow):
             if hasattr(page, "_verify_all"):
                 page._verify_all()
 
+    def closeEvent(self, event):
+        """Al presionar X, preguntar si quiere restablecer el firewall."""
+        from app.services import firewall_service
+        reply = QMessageBox.question(
+            self, "Cerrar aplicación",
+            "<b>¿Desactivar el firewall antes de salir?</b><br><br>"
+            "Sí → Elimina todas las reglas y restaura el acceso normal a internet.<br>"
+            "No → El firewall y los bloqueos siguen activos al cerrar.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            event.ignore()
+            return
+        if reply == QMessageBox.StandardButton.Yes:
+            firewall_service.flush_all()
+            firewall_service.remove_hosts_block()
+            try:
+                from app.services.dns_proxy_service import get_dns_proxy
+                get_dns_proxy().stop()
+            except Exception:
+                pass
+        event.accept()
+
     def _reset_iptables(self):
         reply = QMessageBox.warning(
             self, "Apagar Firewall",

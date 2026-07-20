@@ -179,10 +179,10 @@ def flush_all() -> tuple[bool, str]:
     command_runner.run(["ip6tables", "-P", "FORWARD", "ACCEPT"])
     command_runner.run(["ip6tables", "-P", "OUTPUT", "ACCEPT"])
 
-    # nftables
-    command_runner.run(["nft", "flush", "ruleset"])
+    # Limpiar bloque /etc/hosts si quedó activo
+    remove_hosts_block()
 
-    return True, "Todas las reglas eliminadas (IPv4, IPv6 y nftables)."
+    return True, "Todas las reglas de iptables eliminadas. Red restaurada."
 
 
 def deep_reset_network() -> tuple[bool, str]:
@@ -259,6 +259,68 @@ def deep_reset_network() -> tuple[bool, str]:
 
     return True, "\n".join(log_msgs)
 
+
+
+_HOSTS_MARKER_START = "# BEGIN M-FIREWALL"
+_HOSTS_MARKER_END   = "# END M-FIREWALL"
+
+
+def _get_hosts_domains(config: dict) -> list[str]:
+    domains: list[str] = []
+    for cfg in config.get("blocked_domains", {}).values():
+        if cfg.get("enabled", False):
+            domains.extend(cfg.get("domains", []))
+    return domains
+
+
+def _remove_hosts_block_from_content(content: str) -> str:
+    result, inside = [], False
+    for line in content.splitlines():
+        if _HOSTS_MARKER_START in line:
+            inside = True
+            continue
+        if _HOSTS_MARKER_END in line:
+            inside = False
+            continue
+        if not inside:
+            result.append(line)
+    return "\n".join(result)
+
+
+def apply_hosts_block(config: dict) -> tuple[bool, str]:
+    """Inyecta 0.0.0.0 <dominio> en /etc/hosts para todos los dominios bloqueados."""
+    if get_mode() == "demo":
+        return True, "Modo demo."
+    domains = _get_hosts_domains(config)
+    if not domains:
+        return True, "Sin dominios para inyectar."
+    hosts_path = Path("/etc/hosts")
+    try:
+        content = hosts_path.read_text(encoding="utf-8", errors="ignore")
+        clean = _remove_hosts_block_from_content(content)
+        block_lines = [_HOSTS_MARKER_START]
+        for d in domains:
+            block_lines.append(f"0.0.0.0 {d}")
+        block_lines.append(_HOSTS_MARKER_END)
+        new_content = clean.rstrip() + "\n\n" + "\n".join(block_lines) + "\n"
+        hosts_path.write_text(new_content, encoding="utf-8")
+        return True, f"{len(domains)} dominios bloqueados en /etc/hosts."
+    except Exception as e:
+        return False, f"Error al escribir /etc/hosts: {e}"
+
+
+def remove_hosts_block() -> tuple[bool, str]:
+    """Elimina el bloque M-FIREWALL de /etc/hosts."""
+    if get_mode() == "demo":
+        return True, "Modo demo."
+    hosts_path = Path("/etc/hosts")
+    try:
+        content = hosts_path.read_text(encoding="utf-8", errors="ignore")
+        clean = _remove_hosts_block_from_content(content)
+        hosts_path.write_text(clean.rstrip() + "\n", encoding="utf-8")
+        return True, "/etc/hosts limpiado."
+    except Exception as e:
+        return False, f"Error limpiando /etc/hosts: {e}"
 
 
 def get_active_rules() -> tuple[bool, str]:

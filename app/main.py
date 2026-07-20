@@ -51,6 +51,32 @@ def _apply_defaults(config: dict) -> dict:
     return config
 
 
+def _reset_all_enabled(config: dict) -> dict:
+    """
+    Desmarca todos los bloqueos al iniciar.
+    El usuario siempre arranca con todo desactivado — nunca hay bloqueos activos por defecto.
+    """
+    changed = False
+    for cfg in config.get("blocked_domains", {}).values():
+        if cfg.get("enabled", False):
+            cfg["enabled"] = False
+            changed = True
+    for rule in config.get("mac_rules", []):
+        if rule.get("enabled", False):
+            rule["enabled"] = False
+            changed = True
+    for profile in config.get("conn_profiles", []):
+        if profile.get("enabled", False):
+            profile["enabled"] = False
+            changed = True
+    if config.get("clisrv", {}).get("enabled", False):
+        config["clisrv"]["enabled"] = False
+        changed = True
+    if changed:
+        save_config(config)
+    return config
+
+
 def _auto_detect_network(config: dict) -> dict:
     """
     En Linux: detecta WAN (salida a internet), LAN (hacia clientes) e IP del servidor
@@ -98,6 +124,7 @@ def main():
 
     config = load_config()
     config = _apply_defaults(config)
+    config = _reset_all_enabled(config)     # ← siempre arranca todo desmarcado
     config = _auto_detect_network(config)   # ← auto-detecta red al arrancar
 
     # Iniciar servidor DNS Proxy en segundo plano
